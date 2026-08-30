@@ -36,6 +36,7 @@ jobs:
           # Corte de seguridad mientras se valida la limpieza de copias huerfanas.
           CALENDAR_SYNC_APPLY_ENABLED: 'false'
           CALENDAR_SYNC_PROPAGATE_DELETES: 'false'
+          CALENDAR_SYNC_PRUNE_MANAGED_GOOGLE_ORPHANS: 'false'
           CALENDAR_SYNC_CONFLICT_POLICY: ${{ secrets.CALENDAR_SYNC_CONFLICT_POLICY }}
           CALENDAR_SYNC_REQUIRE_REMOTE_LOCK: 'true'
           CALENDAR_SYNC_LOCK_TTL_SECONDS: '600'

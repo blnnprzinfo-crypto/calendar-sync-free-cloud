@@ -178,6 +178,112 @@ async function run() {
     assert.deepEqual(operations.map(item => item.type), ['create_icloud']);
   });
 
+  await test('por defecto conserva una copia Google enlazada cuyo original no aparece', async () => {
+    const uid = 'icloud-missing-1';
+    const calendar = { name: 'tatuajes', url: 'https://icloud.test/cal/' };
+    const linked = googleEvent({ extendedProperties: { private: {
+      belenciagaSource: 'icloud-caldav-bidirectional',
+      belenciagaSourceKey: service._private.sourceKey(calendar.url, uid),
+      belenciagaIcloudUid: uid,
+      belenciagaIcloudCalendar: 'tatuajes',
+    } } });
+    const request = async method => method === 'GET' ? { items: [linked] } : {};
+    const operations = await service._private.syncCalendarPair({
+      mapping: { icloudName: 'tatuajes', googleCalendarId: 'g1' }, calendar,
+      icloudEvents: [], token: 'token', start: new Date('2026-08-01Z'), end: new Date('2026-09-01Z'),
+      dryRun: true, request,
+    });
+    assert.deepEqual(operations, []);
+  });
+
+  await test('dry-run detecta solo una copia Google gestionada y confirmada como huerfana', async () => {
+    const uid = 'icloud-missing-2';
+    const calendar = { name: 'tatuajes', url: 'https://icloud.test/cal/' };
+    const linked = googleEvent({ extendedProperties: { private: {
+      belenciagaSource: 'icloud-caldav-bidirectional',
+      belenciagaSourceKey: service._private.sourceKey(calendar.url, uid),
+      belenciagaIcloudUid: uid,
+      belenciagaIcloudCalendar: 'tatuajes',
+    } } });
+    const request = async method => method === 'GET' ? { items: [linked] } : {};
+    const operations = await service._private.syncCalendarPair({
+      mapping: { icloudName: 'tatuajes', googleCalendarId: 'g1' }, calendar,
+      icloudEvents: [], token: 'token', start: new Date('2026-08-01Z'), end: new Date('2026-09-01Z'),
+      dryRun: true, request, pruneManagedGoogleOrphans: true,
+      icloudObjectExists: async () => false,
+    });
+    assert.deepEqual(operations.map(item => item.type), ['delete_google_orphan']);
+  });
+
+  await test('apply borra en Google la copia gestionada huerfana y nunca escribe en iCloud', async () => {
+    const uid = 'icloud-missing-3';
+    const calendar = { name: 'tatuajes', url: 'https://icloud.test/cal/' };
+    const linked = googleEvent({ id: 'orphan-3', extendedProperties: { private: {
+      belenciagaSource: 'google-calendar-bidirectional',
+      belenciagaSourceKey: service._private.sourceKey(calendar.url, uid),
+      belenciagaIcloudUid: uid,
+      belenciagaIcloudCalendar: 'tatuajes',
+    } } });
+    const calls = [];
+    const request = async (method, path) => {
+      calls.push({ method, path });
+      return method === 'GET' ? { items: [linked] } : {};
+    };
+    const operations = await service._private.syncCalendarPair({
+      mapping: { icloudName: 'tatuajes', googleCalendarId: 'g1' }, calendar,
+      icloudEvents: [], token: 'token', start: new Date('2026-08-01Z'), end: new Date('2026-09-01Z'),
+      dryRun: false, request, pruneManagedGoogleOrphans: true,
+      icloudObjectExists: async () => false,
+    });
+    assert.deepEqual(operations.map(item => item.type), ['delete_google_orphan']);
+    assert.equal(calls.filter(call => call.method === 'DELETE').length, 1);
+    assert.match(calls.find(call => call.method === 'DELETE').path, /orphan-3/);
+  });
+
+  await test('no borra un evento con metadatos incompletos o de otro calendario', async () => {
+    const linked = googleEvent({ extendedProperties: { private: {
+      belenciagaSource: 'icloud-caldav-bidirectional',
+      belenciagaSourceKey: 'no-es-la-clave-del-uid',
+      belenciagaIcloudUid: 'uid-ajeno',
+      belenciagaIcloudCalendar: 'Trabajo',
+    } } });
+    const request = async method => method === 'GET' ? { items: [linked] } : {};
+    const operations = await service._private.syncCalendarPair({
+      mapping: { icloudName: 'tatuajes', googleCalendarId: 'g1' },
+      calendar: { name: 'tatuajes', url: 'https://icloud.test/cal/' },
+      icloudEvents: [], token: 'token', start: new Date('2026-08-01Z'), end: new Date('2026-09-01Z'),
+      dryRun: true, request, pruneManagedGoogleOrphans: true,
+      icloudObjectExists: async () => false,
+    });
+    assert.deepEqual(operations, []);
+  });
+
+  await test('conserva una copia canonica y detecta solo la copia Google repetida', async () => {
+    const apple = appleEvent();
+    const calendar = { name: 'tatuajes', url: 'https://icloud.test/cal/' };
+    const props = {
+      belenciagaSource: 'icloud-caldav-bidirectional',
+      belenciagaSourceKey: apple.sourceKey,
+      belenciagaIcloudUid: apple.uid,
+      belenciagaIcloudCalendar: 'tatuajes',
+      belenciagaIcloudFingerprint: apple.fingerprint,
+      belenciagaGoogleFingerprint: service.contentFingerprint(googleEvent()),
+    };
+    // Para esta prueba la clave real del evento debe corresponder con URL+UID.
+    apple.sourceKey = service._private.sourceKey(calendar.url, apple.uid);
+    props.belenciagaSourceKey = apple.sourceKey;
+    const first = googleEvent({ id: 'canonical', extendedProperties: { private: props } });
+    const second = googleEvent({ id: 'duplicate', extendedProperties: { private: props } });
+    const request = async method => method === 'GET' ? { items: [first, second] } : {};
+    const operations = await service._private.syncCalendarPair({
+      mapping: { icloudName: 'tatuajes', googleCalendarId: 'g1' }, calendar,
+      icloudEvents: [apple], token: 'token', start: new Date('2026-08-01Z'), end: new Date('2026-09-01Z'),
+      dryRun: true, request, pruneManagedGoogleOrphans: true,
+      icloudObjectExists: async () => true,
+    });
+    assert.deepEqual(operations.map(item => item.type), ['skip_unchanged', 'delete_google_duplicate']);
+  });
+
   await test('enlaza copias existentes sin duplicarlas', async () => {
     const request = async method => method === 'GET' ? { items: [googleEvent()] } : {};
     const operations = await service._private.syncCalendarPair({

@@ -286,7 +286,24 @@ function eventHref(calendar, uid) {
   return new URL(`${encodeURIComponent(uid)}.ics`, calendar.url.endsWith('/') ? calendar.url : `${calendar.url}/`).href;
 }
 
-async function syncCalendarPair({ mapping, calendar, icloudEvents, token, start, end, dryRun, request }) {
+function isManagedGoogleCopyForMapping(event, mapping, calendar) {
+  const props = privateProps(event);
+  const uid = String(props.belenciagaIcloudUid || '');
+  const linkedKey = String(props.belenciagaSourceKey || '');
+  const source = String(props.belenciagaSource || '');
+  const allowedSources = new Set(['icloud-caldav-bidirectional', 'google-calendar-bidirectional']);
+  return Boolean(uid)
+    && Boolean(linkedKey)
+    && allowedSources.has(source)
+    && normalizeName(props.belenciagaIcloudCalendar) === normalizeName(mapping.icloudName)
+    && sourceKey(calendar.url, uid) === linkedKey;
+}
+
+async function syncCalendarPair({
+  mapping, calendar, icloudEvents, token, start, end, dryRun, request,
+  pruneManagedGoogleOrphans = false,
+  icloudObjectExists = icloud.calendarObjectExists,
+}) {
   const googleEvents = await listGoogleEvents({ token, calendarId: mapping.googleCalendarId, start, end, request });
   const icloudByKey = new Map(icloudEvents.map(event => [event.sourceKey, event]));
   const googleByKey = new Map();
@@ -306,6 +323,7 @@ async function syncCalendarPair({ mapping, calendar, icloudEvents, token, start,
   }
   const operations = [];
   const consumedGoogleIds = new Set();
+  const matchedGoogleIds = new Set();
 
   for (const appleEvent of icloudEvents) {
     const googleEvent = googleByKey.get(appleEvent.sourceKey);
@@ -350,6 +368,7 @@ async function syncCalendarPair({ mapping, calendar, icloudEvents, token, start,
       continue;
     }
     googleByKey.delete(appleEvent.sourceKey);
+    matchedGoogleIds.add(googleEvent.id);
     const props = privateProps(googleEvent);
     const appleChanged = props.belenciagaIcloudFingerprint !== appleEvent.fingerprint;
     const currentGoogleFingerprint = contentFingerprint(googleEvent);
@@ -400,7 +419,29 @@ async function syncCalendarPair({ mapping, calendar, icloudEvents, token, start,
     const props = privateProps(googleEvent);
     const linkedKey = props.belenciagaSourceKey;
     if (linkedKey) {
-      // Si falta el original de iCloud, conservamos la copia de Google.
+      if (!pruneManagedGoogleOrphans || !isManagedGoogleCopyForMapping(googleEvent, mapping, calendar)) continue;
+
+      if (icloudByKey.has(linkedKey)) {
+        if (matchedGoogleIds.has(googleEvent.id)) continue;
+        operations.push({
+          type: 'delete_google_duplicate', calendar: mapping.icloudName,
+          summary: googleEvent.summary, sourceKey: linkedKey, googleUpdated: googleEvent.updated || '',
+        });
+        if (!dryRun) {
+          await request('DELETE', `/calendars/${encodeURIComponent(mapping.googleCalendarId)}/events/${encodeURIComponent(googleEvent.id)}?sendUpdates=none`, token);
+        }
+        continue;
+      }
+
+      const exists = await icloudObjectExists({ url: eventHref(calendar, props.belenciagaIcloudUid) });
+      if (exists) continue;
+      operations.push({
+        type: 'delete_google_orphan', calendar: mapping.icloudName,
+        summary: googleEvent.summary, sourceKey: linkedKey, googleUpdated: googleEvent.updated || '',
+      });
+      if (!dryRun) {
+        await request('DELETE', `/calendars/${encodeURIComponent(mapping.googleCalendarId)}/events/${encodeURIComponent(googleEvent.id)}?sendUpdates=none`, token);
+      }
       continue;
     }
     const uid = `belenciaga-google-${randomUUID()}@calendar-sync`;
@@ -434,6 +475,8 @@ async function syncBidirectional(options = {}) {
     throw new Error('CALENDAR_SYNC_PROPAGATE_DELETES=true esta prohibido: este sincronizador nunca propaga borrados.');
   }
   const propagateDeletes = false;
+  const pruneManagedGoogleOrphans = options.pruneManagedGoogleOrphans
+    ?? process.env.CALENDAR_SYNC_PRUNE_MANAGED_GOOGLE_ORPHANS === 'true';
   const conflictPolicy = getConflictPolicy();
   const mappings = getCalendarMap();
   const { start, end } = getWindow(options.now || new Date());
@@ -448,7 +491,10 @@ async function syncBidirectional(options = {}) {
     if (!calendar) throw new Error(`No existe el calendario iCloud: ${mapping.icloudName}`);
     try {
       const events = await icloud.fetchEventsFromCalendar(calendar, start, end);
-      const operations = await syncCalendarPair({ mapping, calendar, icloudEvents: events, token, start, end, dryRun, request });
+      const operations = await syncCalendarPair({
+        mapping, calendar, icloudEvents: events, token, start, end, dryRun, request,
+        pruneManagedGoogleOrphans,
+      });
       allOperations.push(...operations);
     } catch (error) {
       throw new Error(`${mapping.icloudName}: ${error.message}`);
@@ -460,6 +506,7 @@ async function syncBidirectional(options = {}) {
   return {
     dryRun,
     propagateDeletes,
+    pruneManagedGoogleOrphans,
     conflictPolicy,
     window: { start: start.toISOString(), end: end.toISOString() },
     calendars: mappings.map(item => item.icloudName),
@@ -477,5 +524,5 @@ module.exports = {
   summaryDateKey,
   googleEventToIcs,
   selectConflictWinner,
-  _private: { buildGoogleFromIcloud, sourceKey, syncCalendarPair, normalizeName, legacyContentFingerprint, canonicalTime },
+  _private: { buildGoogleFromIcloud, sourceKey, syncCalendarPair, normalizeName, legacyContentFingerprint, canonicalTime, isManagedGoogleCopyForMapping },
 };

@@ -128,6 +128,19 @@ async function deleteCalendarObject({ url, etag = '' }) {
   return { ok: true, url };
 }
 
+async function calendarObjectExists({ url }) {
+  try {
+    await caldavRequest('GET', url, null, {
+      'Content-Type': 'text/calendar; charset=utf-8',
+      Depth: '0',
+    });
+    return true;
+  } catch (error) {
+    if (error.status === 404) return false;
+    throw error;
+  }
+}
+
 async function propfind(url, props, depth = '0') {
   const body = `<?xml version="1.0" encoding="utf-8"?>
 <d:propfind xmlns:d="DAV:" xmlns:cs="http://calendarserver.org/ns/" xmlns:c="urn:ietf:params:xml:ns:caldav">
@@ -291,6 +304,7 @@ module.exports = {
   fetchIcloudEvents,
   putCalendarObject,
   deleteCalendarObject,
+  calendarObjectExists,
   _private: {
     caldavRequest,
     calendarReport,
