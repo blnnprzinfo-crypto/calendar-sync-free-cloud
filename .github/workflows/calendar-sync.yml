@@ -1,4 +1,4 @@
-name: Calendar sync disposable test
+name: Calendar sync
 
 on:
   schedule:
@@ -22,14 +22,18 @@ jobs:
         with:
           node-version: '24'
       - run: npm ci --omit=dev --ignore-scripts
-      - name: Sync only disposable calendars
+      - name: Sync configured allowlist
         run: |
-          node scripts/PRODUCTION/sync/sync-bidirectional-calendars.js --apply --once --require-remote-lock
+          if [ "$CALENDAR_SYNC_APPLY_ENABLED" = "true" ]; then
+            node scripts/PRODUCTION/sync/sync-bidirectional-calendars.js --apply --once --require-remote-lock
+          else
+            CALENDAR_BIDIRECTIONAL_DRY_RUN=true node scripts/PRODUCTION/sync/sync-bidirectional-calendars.js --once --require-remote-lock
+          fi
           node scripts/PRODUCTION/diagnostics/calendar-sync-healthcheck.js
         env:
           NODE_ENV: production
           TZ: Europe/Madrid
-          CALENDAR_BIDIRECTIONAL_DRY_RUN: 'false'
+          CALENDAR_SYNC_APPLY_ENABLED: ${{ secrets.CALENDAR_SYNC_APPLY_ENABLED }}
           CALENDAR_SYNC_PROPAGATE_DELETES: 'false'
           CALENDAR_SYNC_CONFLICT_POLICY: ${{ secrets.CALENDAR_SYNC_CONFLICT_POLICY }}
           CALENDAR_SYNC_REQUIRE_REMOTE_LOCK: 'true'
