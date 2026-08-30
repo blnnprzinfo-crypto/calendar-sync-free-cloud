@@ -2,7 +2,7 @@ name: Calendar sync
 
 on:
   schedule:
-    - cron: '2-59/5 * * * *'
+    - cron: '7,22,37,52 * * * *'
   workflow_dispatch:
 
 concurrency:
@@ -40,7 +40,7 @@ jobs:
           CALENDAR_SYNC_LOCK_TTL_SECONDS: '600'
           CALENDAR_SYNC_LOCK_ALLOW_CREATE: 'false'
           CALENDAR_SYNC_LOG_EVENT_DETAILS: 'false'
-          CALENDAR_SYNC_WRITER_ID: github-actions-disposable-test
+          CALENDAR_SYNC_WRITER_ID: github-actions-production
           CALENDAR_SYNC_LOCK_CALENDAR_ID: ${{ secrets.CALENDAR_SYNC_LOCK_CALENDAR_ID }}
           CALENDAR_SYNC_MAP_JSON: ${{ secrets.CALENDAR_SYNC_MAP_JSON }}
           CALENDAR_SYNC_EXPECTED_MAPPING_COUNT: ${{ secrets.CALENDAR_SYNC_EXPECTED_MAPPING_COUNT }}
