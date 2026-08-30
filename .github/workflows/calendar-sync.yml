@@ -1,0 +1,56 @@
+name: Calendar sync disposable test
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: calendar-sync-single-writer
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm ci --omit=dev --ignore-scripts
+      - name: Sync only disposable calendars
+        run: |
+          node scripts/PRODUCTION/sync/sync-bidirectional-calendars.js --apply --once --require-remote-lock
+          node scripts/PRODUCTION/diagnostics/calendar-sync-healthcheck.js
+        env:
+          NODE_ENV: production
+          TZ: Europe/Madrid
+          CALENDAR_BIDIRECTIONAL_DRY_RUN: 'false'
+          CALENDAR_SYNC_PROPAGATE_DELETES: 'false'
+          CALENDAR_SYNC_CONFLICT_POLICY: newest_wins
+          CALENDAR_SYNC_REQUIRE_REMOTE_LOCK: 'true'
+          CALENDAR_SYNC_LOCK_TTL_SECONDS: '600'
+          CALENDAR_SYNC_LOCK_ALLOW_CREATE: 'false'
+          CALENDAR_SYNC_LOG_EVENT_DETAILS: 'false'
+          CALENDAR_SYNC_WRITER_ID: github-actions-disposable-test
+          CALENDAR_SYNC_LOCK_CALENDAR_ID: ${{ secrets.CALENDAR_SYNC_LOCK_CALENDAR_ID }}
+          CALENDAR_SYNC_MAP_JSON: ${{ secrets.CALENDAR_SYNC_MAP_JSON }}
+          CALENDAR_SYNC_EXPECTED_MAPPING_COUNT: '1'
+          CALENDAR_SYNC_ENFORCE_ALLOWLIST: 'true'
+          CALENDAR_SYNC_ALLOWED_ICLOUD_NAMES_JSON: '["SYNC-TEST-iCloud"]'
+          CALENDAR_SYNC_ALLOWED_GOOGLE_IDS_JSON: ${{ secrets.CALENDAR_SYNC_ALLOWED_GOOGLE_IDS_JSON }}
+          CALENDAR_SYNC_HEARTBEAT_PATH: ${{ runner.temp }}/calendar-sync-heartbeat.json
+          CALENDAR_SYNC_HEARTBEAT_MAX_AGE_SECONDS: '180'
+          ICLOUD_USERNAME: ${{ secrets.ICLOUD_USERNAME }}
+          ICLOUD_APP_PASSWORD: ${{ secrets.ICLOUD_APP_PASSWORD }}
+          ICLOUD_CALDAV_BASE_URL: https://caldav.icloud.com/
+          ICLOUD_SYNC_PAST_DAYS: '30'
+          ICLOUD_SYNC_FUTURE_DAYS: '365'
+          GOOGLE_CALENDAR_AUTH_MODE: service_account
+          GOOGLE_CALENDAR_SCOPE: https://www.googleapis.com/auth/calendar
+          GOOGLE_SERVICE_ACCOUNT_EMAIL: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_EMAIL }}
+          GOOGLE_PRIVATE_KEY: ${{ secrets.GOOGLE_PRIVATE_KEY }}

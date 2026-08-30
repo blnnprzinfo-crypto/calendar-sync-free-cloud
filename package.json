@@ -1,0 +1,21 @@
+{
+  "name": "calendar-sync-free-cloud",
+  "version": "1.0.0",
+  "private": false,
+  "description": "Minimal bidirectional iCloud CalDAV and Google Calendar sync runtime",
+  "license": "MIT",
+  "scripts": {
+    "sync:once": "node scripts/PRODUCTION/sync/sync-bidirectional-calendars.js --apply --once --require-remote-lock",
+    "sync:dry": "node scripts/PRODUCTION/sync/sync-bidirectional-calendars.js --dry-run --once",
+    "health": "node scripts/PRODUCTION/diagnostics/calendar-sync-healthcheck.js",
+    "lock:init": "node scripts/SETUP/calendar/initialize-calendar-sync-lock.js --apply",
+    "test": "node scripts/QA/tests/calendar/test-calendar-bidirectional-sync.js && node scripts/QA/tests/calendar/test-calendar-cloud-runtime.js"
+  },
+  "dependencies": {
+    "dotenv": "16.6.1",
+    "fast-xml-parser": "5.9.3"
+  },
+  "engines": {
+    "node": "24.x"
+  }
+}

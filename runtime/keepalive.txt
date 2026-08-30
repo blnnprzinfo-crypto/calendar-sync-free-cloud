@@ -1,0 +1,1 @@
+Repository activity heartbeat. No calendar or account data is stored here.
