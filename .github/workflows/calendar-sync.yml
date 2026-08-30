@@ -33,10 +33,11 @@ jobs:
         env:
           NODE_ENV: production
           TZ: Europe/Madrid
-          # Corte de seguridad mientras se valida la limpieza de copias huerfanas.
-          CALENDAR_SYNC_APPLY_ENABLED: 'false'
+          CALENDAR_SYNC_APPLY_ENABLED: ${{ secrets.CALENDAR_SYNC_APPLY_ENABLED }}
           CALENDAR_SYNC_PROPAGATE_DELETES: 'false'
-          CALENDAR_SYNC_PRUNE_MANAGED_GOOGLE_ORPHANS: 'false'
+          # Solo elimina copias Google marcadas por este puente tras confirmar
+          # que el objeto correspondiente ya no existe en iCloud.
+          CALENDAR_SYNC_PRUNE_MANAGED_GOOGLE_ORPHANS: 'true'
           CALENDAR_SYNC_CONFLICT_POLICY: ${{ secrets.CALENDAR_SYNC_CONFLICT_POLICY }}
           CALENDAR_SYNC_REQUIRE_REMOTE_LOCK: 'true'
           CALENDAR_SYNC_LOCK_TTL_SECONDS: '600'
