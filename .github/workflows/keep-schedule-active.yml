@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-slim
     timeout-minutes: 2
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Record public repository activity
         run: |
           date -u +'%Y-%m-%dT%H:%M:%SZ' > runtime/keepalive.txt
