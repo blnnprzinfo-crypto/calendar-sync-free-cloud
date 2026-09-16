@@ -1,8 +1,14 @@
 name: Calendar sync
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/services/**'
+      - 'scripts/PRODUCTION/**'
+      - '.github/workflows/calendar-sync.yml'
   schedule:
-    - cron: '7,22,37,52 * * * *'
+    - cron: '2-59/5 * * * *'
   workflow_dispatch:
 
 concurrency:
@@ -22,6 +28,7 @@ jobs:
         with:
           node-version: '24'
       - run: npm ci --omit=dev --ignore-scripts
+      - run: npm test
       - name: Sync configured allowlist
         run: |
           if [ "$CALENDAR_SYNC_APPLY_ENABLED" = "true" ]; then

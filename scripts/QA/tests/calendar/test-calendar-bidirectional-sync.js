@@ -320,6 +320,33 @@ async function run() {
     assert.deepEqual(operations.map(item => item.type), ['update_icloud']);
   });
 
+  await test('una eliminacion Google no se restaura ni reescribe iCloud en pasadas sucesivas', async () => {
+    const apple = appleEvent();
+    const google = googleEvent({ status: 'cancelled', extendedProperties: { private: {
+      belenciagaSourceKey: apple.sourceKey,
+      belenciagaIcloudFingerprint: 'older-apple-fingerprint',
+      belenciagaGoogleFingerprint: service.contentFingerprint(googleEvent()),
+    } } });
+    const icloud = require('../../../../src/services/icloudCalDavService');
+    const originalPut = icloud.putCalendarObject;
+    icloud.putCalendarObject = async () => { throw new Error('Unexpected Apple write'); };
+    try {
+      for (const dryRun of [true, false, false]) {
+        const operations = await service._private.syncCalendarPair({
+          mapping: { icloudName: 'tatuajes', googleCalendarId: 'g1' },
+          calendar: { name: 'tatuajes', url: 'https://icloud.test/cal/' },
+          icloudEvents: [apple], token: 'token',
+          start: new Date('2026-08-01Z'), end: new Date('2026-09-01Z'),
+          dryRun, request: async method => {
+            assert.equal(method, 'GET', 'No Google mutations for a tombstone');
+            return { items: [google] };
+          },
+        });
+        assert.deepEqual(operations.map(item => item.type), ['skip_google_cancelled']);
+      }
+    } finally { icloud.putCalendarObject = originalPut; }
+  });
+
   await test('la misma hora en UTC y en Europe/Madrid da la misma huella', () => {
     // iCloud devuelve UTC y Google devuelve el desfase local. Es el mismo
     // instante, asi que la huella tiene que coincidir.

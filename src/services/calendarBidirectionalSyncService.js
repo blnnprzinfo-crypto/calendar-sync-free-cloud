@@ -369,6 +369,13 @@ async function syncCalendarPair({
     }
     googleByKey.delete(appleEvent.sourceKey);
     matchedGoogleIds.add(googleEvent.id);
+    // A Google tombstone is not an edit. Serializing it as a confirmed ICS
+    // and then copying Apple back would silently resurrect the deleted event.
+    // Preserve both sides under the existing no-delete-propagation policy.
+    if (googleEvent.status === 'cancelled') {
+      operations.push({ type: 'skip_google_cancelled', calendar: mapping.icloudName, summary: appleEvent.summary, sourceKey: appleEvent.sourceKey, googleUpdated: googleEvent.updated || '' });
+      continue;
+    }
     const props = privateProps(googleEvent);
     const appleChanged = props.belenciagaIcloudFingerprint !== appleEvent.fingerprint;
     const currentGoogleFingerprint = contentFingerprint(googleEvent);
