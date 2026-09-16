@@ -100,6 +100,7 @@ function getCalendarMap() {
 async function googleRequest(method, path, token, body = null) {
   const response = await fetch(`${GOOGLE_BASE}${path}`, {
     method,
+    signal: AbortSignal.timeout(30_000),
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: body == null ? undefined : JSON.stringify(body),
   });
@@ -194,7 +195,7 @@ function toIcsDateValue(value, fallbackTimezone = 'Europe/Madrid') {
   return { line: `;TZID=${value.timeZone || fallbackTimezone}:${raw}`, allDay: false };
 }
 
-function googleEventToIcs(event, uid) {
+function googleEventToIcs(event, uid, alarms = []) {
   const now = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
   const start = toIcsDateValue(event.start);
   const end = toIcsDateValue(event.end);
@@ -215,7 +216,7 @@ function googleEventToIcs(event, uid) {
   ];
   if (event.description) lines.push(`DESCRIPTION:${escapeIcs(event.description)}`);
   if (event.location) lines.push(`LOCATION:${escapeIcs(event.location)}`);
-  lines.push(...recurrence, 'STATUS:CONFIRMED', 'END:VEVENT', 'END:VCALENDAR', '');
+  lines.push(...recurrence, 'STATUS:CONFIRMED', ...alarms.flat(), 'END:VEVENT', 'END:VCALENDAR', '');
   return lines.join('\r\n');
 }
 
@@ -393,7 +394,7 @@ async function syncCalendarPair({
         await icloud.putCalendarObject({
           url: appleEvent.href,
           etag: appleEvent.etag,
-          ics: googleEventToIcs(googleEvent, appleEvent.uid),
+          ics: googleEventToIcs(googleEvent, appleEvent.uid, appleEvent.alarms),
         });
         await request('PATCH', `/calendars/${encodeURIComponent(mapping.googleCalendarId)}/events/${encodeURIComponent(googleEvent.id)}?sendUpdates=none`, token, {
           extendedProperties: { private: { ...props, belenciagaGoogleFingerprint: currentGoogleFingerprint } },

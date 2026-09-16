@@ -347,6 +347,20 @@ async function run() {
     } finally { icloud.putCalendarObject = originalPut; }
   });
 
+  await test('editar desde Google conserva avisos Apple sin mezclar su descripcion', () => {
+    const { parseIcsEvents } = require('../../../../src/services/calendarIcsEventParser');
+    const alarm = ['BEGIN:VALARM', 'ACTION:DISPLAY', 'TRIGGER:-PT15M', 'DESCRIPTION:Recordatorio', 'END:VALARM'];
+    const initial = service.googleEventToIcs(googleEvent({ description: '' }), 'alarm-uid', [alarm]);
+    const parsed = parseIcsEvents(initial)[0];
+    assert.equal(parsed.description, '');
+    assert.deepEqual(parsed.alarms, [alarm]);
+    const edited = service.googleEventToIcs(googleEvent({ summary: 'Nueva hora' }), parsed.uid, parsed.alarms);
+    const roundTrip = parseIcsEvents(edited)[0];
+    assert.equal(roundTrip.summary, 'Nueva hora');
+    assert.equal(roundTrip.description, 'Linea 1');
+    assert.deepEqual(roundTrip.alarms, [alarm]);
+  });
+
   await test('la misma hora en UTC y en Europe/Madrid da la misma huella', () => {
     // iCloud devuelve UTC y Google devuelve el desfase local. Es el mismo
     // instante, asi que la huella tiene que coincidir.

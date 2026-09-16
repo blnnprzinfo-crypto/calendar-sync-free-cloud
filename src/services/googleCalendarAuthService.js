@@ -74,6 +74,7 @@ function buildServiceAccountJwt(scopeOverride = null) {
 async function getServiceAccountToken(scopeOverride = null) {
   const jwt = buildServiceAccountJwt(scopeOverride);
   const res = await fetch('https://oauth2.googleapis.com/token', {
+    signal: AbortSignal.timeout(30_000),
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
@@ -91,6 +92,7 @@ async function getServiceAccountToken(scopeOverride = null) {
 
 async function getOAuthToken() {
   const res = await fetch('https://oauth2.googleapis.com/token', {
+    signal: AbortSignal.timeout(30_000),
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({

@@ -90,6 +90,7 @@ function supportsEvents(response) {
 async function caldavRequest(method, url, body, headers = {}) {
   const res = await fetch(url, {
     method,
+    signal: AbortSignal.timeout(30_000),
     headers: {
       Authorization: getBasicAuthHeader(),
       'Content-Type': 'application/xml; charset=utf-8',

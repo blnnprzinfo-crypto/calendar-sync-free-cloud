@@ -160,6 +160,7 @@ function normalizeEvent(raw, meta = {}) {
     calendarUrl: meta.calendarUrl || '',
     href: meta.href || '',
     etag: meta.etag || '',
+    alarms: raw.__alarms || [],
   };
 
   const sourceBase = event.calendarUrl || event.calendarName || 'icloud';
@@ -185,10 +186,12 @@ function parseIcsEvents(text, meta = {}) {
   const lines = unfoldIcsLines(text);
   const events = [];
   let current = null;
+  let alarm = null;
 
   for (const line of lines) {
     if (line === 'BEGIN:VEVENT') {
       current = {};
+      alarm = null;
       continue;
     }
     if (line === 'END:VEVENT') {
@@ -200,6 +203,18 @@ function parseIcsEvents(text, meta = {}) {
       continue;
     }
     if (!current) continue;
+    if (line === 'BEGIN:VALARM') {
+      alarm = [line];
+      continue;
+    }
+    if (alarm) {
+      alarm.push(line);
+      if (line === 'END:VALARM') {
+        (current.__alarms ||= []).push(alarm);
+        alarm = null;
+      }
+      continue;
+    }
 
     const prop = parsePropertyLine(line);
     if (!prop) continue;
