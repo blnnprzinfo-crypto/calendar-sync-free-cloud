@@ -62,7 +62,7 @@ function systemdNotify(argument) {
 function print(result, { compact = false } = {}) {
   log('INFO', 'Sincronizacion completada.', {
     mode: result.dryRun ? 'dry-run' : 'apply', conflictPolicy: result.conflictPolicy,
-    propagateDeletes: result.propagateDeletes, calendars: result.calendars.length,
+    propagateDeletes: result.propagateDeletes, googleDeletesToIcloud: result.googleDeletesToIcloud, calendars: result.calendars.length,
     window: result.window, counts: result.counts,
   });
   const visible = compact ? result.operations.filter(op => op.type !== 'skip_unchanged') : result.operations;

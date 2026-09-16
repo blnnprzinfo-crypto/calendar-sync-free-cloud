@@ -3,6 +3,7 @@
 const { createHash, randomUUID } = require('node:crypto');
 const icloud = require('./icloudCalDavService');
 const googleAuth = require('./googleCalendarAuthService');
+const { backupBeforeDeletion } = require('./calendarDeletionBackup');
 
 const GOOGLE_BASE = 'https://www.googleapis.com/calendar/v3';
 
@@ -303,6 +304,7 @@ function isManagedGoogleCopyForMapping(event, mapping, calendar) {
 async function syncCalendarPair({
   mapping, calendar, icloudEvents, token, start, end, dryRun, request,
   pruneManagedGoogleOrphans = false,
+  googleDeletesToIcloud = false,
   icloudObjectExists = icloud.calendarObjectExists,
 }) {
   const googleEvents = await listGoogleEvents({ token, calendarId: mapping.googleCalendarId, start, end, request });
@@ -312,7 +314,8 @@ async function syncCalendarPair({
   const unlinkedBySummaryDate = new Map();
   for (const event of googleEvents) {
     const key = privateProps(event).belenciagaSourceKey;
-    if (key && !googleByKey.has(key)) googleByKey.set(key, event);
+    if (key && (!googleByKey.has(key)
+      || (googleByKey.get(key).status === 'cancelled' && event.status !== 'cancelled'))) googleByKey.set(key, event);
     if (!key && event.status !== 'cancelled') {
       const loose = looseFingerprint(event);
       if (!unlinkedByLooseFingerprint.has(loose)) unlinkedByLooseFingerprint.set(loose, []);
@@ -325,8 +328,10 @@ async function syncCalendarPair({
   const operations = [];
   const consumedGoogleIds = new Set();
   const matchedGoogleIds = new Set();
+  const deletedAppleKeys = new Set();
 
   for (const appleEvent of icloudEvents) {
+    if (deletedAppleKeys.has(appleEvent.sourceKey)) continue;
     const googleEvent = googleByKey.get(appleEvent.sourceKey);
     if (!googleEvent) {
       let candidates = (unlinkedByLooseFingerprint.get(looseFingerprint(appleEvent)) || [])
@@ -372,8 +377,34 @@ async function syncCalendarPair({
     matchedGoogleIds.add(googleEvent.id);
     // A Google tombstone is not an edit. Serializing it as a confirmed ICS
     // and then copying Apple back would silently resurrect the deleted event.
-    // Preserve both sides under the existing no-delete-propagation policy.
+    // Only a verified, managed, whole-event cancellation may delete Apple.
     if (googleEvent.status === 'cancelled') {
+      if (googleDeletesToIcloud && !googleEvent.recurringEventId
+          && isManagedGoogleCopyForMapping(googleEvent, mapping, calendar)
+          && privateProps(googleEvent).belenciagaIcloudUid === appleEvent.uid
+          && appleEvent.etag) {
+        if (!dryRun) {
+          const eventPath = `/calendars/${encodeURIComponent(mapping.googleCalendarId)}/events/${encodeURIComponent(googleEvent.id)}`;
+          const fresh = await request('GET', eventPath, token);
+          if (fresh?.status !== 'cancelled' || fresh.recurringEventId
+              || !isManagedGoogleCopyForMapping(fresh, mapping, calendar)
+              || privateProps(fresh).belenciagaSourceKey !== appleEvent.sourceKey) {
+            operations.push({ type: 'skip_deletion_changed', calendar: mapping.icloudName, sourceKey: appleEvent.sourceKey });
+            continue;
+          }
+          const ics = await icloud._private.caldavRequest('GET', appleEvent.href);
+          await backupBeforeDeletion({ appleEvent, googleEvent: fresh, mapping, token, request, ics });
+          const verified = await request('GET', eventPath, token);
+          if (verified?.status !== 'cancelled' || verified.etag !== fresh.etag) {
+            operations.push({ type: 'skip_deletion_changed', calendar: mapping.icloudName, sourceKey: appleEvent.sourceKey });
+            continue;
+          }
+          await icloud.deleteCalendarObject({ url: appleEvent.href, etag: appleEvent.etag });
+        }
+        operations.push({ type: 'delete_icloud', calendar: mapping.icloudName, summary: appleEvent.summary, sourceKey: appleEvent.sourceKey, googleUpdated: googleEvent.updated || '' });
+        deletedAppleKeys.add(appleEvent.sourceKey);
+        continue;
+      }
       operations.push({ type: 'skip_google_cancelled', calendar: mapping.icloudName, summary: appleEvent.summary, sourceKey: appleEvent.sourceKey, googleUpdated: googleEvent.updated || '' });
       continue;
     }
@@ -421,7 +452,7 @@ async function syncCalendarPair({
   for (const googleEvent of googleEvents) {
     if (consumedGoogleIds.has(googleEvent.id)) continue;
     if (googleEvent.status === 'cancelled') {
-      // Politica permanente de este puente: un borrado nunca se replica.
+      // Linked cancellations were handled above; never create cancelled events.
       continue;
     }
     const props = privateProps(googleEvent);
@@ -483,6 +514,8 @@ async function syncBidirectional(options = {}) {
     throw new Error('CALENDAR_SYNC_PROPAGATE_DELETES=true esta prohibido: este sincronizador nunca propaga borrados.');
   }
   const propagateDeletes = false;
+  const googleDeletesToIcloud = options.googleDeletesToIcloud
+    ?? process.env.CALENDAR_SYNC_GOOGLE_DELETES_TO_ICLOUD === 'true';
   const pruneManagedGoogleOrphans = options.pruneManagedGoogleOrphans
     ?? process.env.CALENDAR_SYNC_PRUNE_MANAGED_GOOGLE_ORPHANS === 'true';
   const conflictPolicy = getConflictPolicy();
@@ -501,7 +534,7 @@ async function syncBidirectional(options = {}) {
       const events = await icloud.fetchEventsFromCalendar(calendar, start, end);
       const operations = await syncCalendarPair({
         mapping, calendar, icloudEvents: events, token, start, end, dryRun, request,
-        pruneManagedGoogleOrphans,
+        pruneManagedGoogleOrphans, googleDeletesToIcloud,
       });
       allOperations.push(...operations);
     } catch (error) {
@@ -514,6 +547,7 @@ async function syncBidirectional(options = {}) {
   return {
     dryRun,
     propagateDeletes,
+    googleDeletesToIcloud,
     pruneManagedGoogleOrphans,
     conflictPolicy,
     window: { start: start.toISOString(), end: end.toISOString() },
