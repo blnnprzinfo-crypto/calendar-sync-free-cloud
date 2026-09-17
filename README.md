@@ -24,7 +24,19 @@ the same remote lease. GitHub scheduling is best effort.
 
 Deletion backups are private, transparent technical events dated 2000-01-01.
 Their `extendedProperties.private` contains `deletionBackup=v1`, a SHA-256
-checksum, a chunk count and `data0..N` chunks. Concatenate the chunks, base64
-decode and gunzip to recover JSON containing the original ICS, URL and ETag.
-Restoration must use create-only semantics to avoid overwriting a newer event.
+checksum, a chunk count, `data0..N` chunks, and readable `originalSummary`/
+`originalStart`/`deletedAt` fields for listing without decompressing.
 Backups remain in the technical calendar, never in public logs or artifacts.
+
+To recover an appointment that was deleted in Google (and therefore removed
+from iCloud), use the restore tool instead of decoding backups by hand:
+
+```
+npm run restore:list                                           # see what's recoverable
+node scripts/PRODUCTION/sync/restore-deleted-icloud-event.js --id <backup-id>            # preview
+node scripts/PRODUCTION/sync/restore-deleted-icloud-event.js --id <backup-id> --apply    # restore
+```
+
+Restoration always uses create-only semantics (`If-None-Match: *`) so it can
+never overwrite a newer event that already exists at the same iCloud href —
+if one exists, the restore fails loudly instead of silently discarding it.
