@@ -306,6 +306,8 @@ async function syncCalendarPair({
   pruneManagedGoogleOrphans = false,
   googleDeletesToIcloud = false,
   icloudObjectExists = icloud.calendarObjectExists,
+  fetchCreatedIcloudEvent = icloud.fetchCalendarObjectByHref,
+  putIcloudObject = icloud.putCalendarObject,
 }) {
   const googleEvents = await listGoogleEvents({ token, calendarId: mapping.googleCalendarId, start, end, request });
   const icloudByKey = new Map(icloudEvents.map(event => [event.sourceKey, event]));
@@ -392,7 +394,7 @@ async function syncCalendarPair({
             operations.push({ type: 'skip_deletion_changed', calendar: mapping.icloudName, sourceKey: appleEvent.sourceKey });
             continue;
           }
-          const ics = await icloud._private.caldavRequest('GET', appleEvent.href);
+          const { text: ics } = await icloud._private.caldavRequest('GET', appleEvent.href);
           await backupBeforeDeletion({ appleEvent, googleEvent: fresh, mapping, token, request, ics });
           const verified = await request('GET', eventPath, token);
           if (verified?.status !== 'cancelled' || verified.etag !== fresh.etag) {
@@ -422,7 +424,7 @@ async function syncCalendarPair({
     if (winner === 'google') {
       operations.push({ type: 'update_icloud', calendar: mapping.icloudName, summary: googleEvent.summary, sourceKey: appleEvent.sourceKey, googleUpdated: googleEvent.updated || '' });
       if (!dryRun) {
-        await icloud.putCalendarObject({
+        await putIcloudObject({
           url: appleEvent.href,
           etag: appleEvent.etag,
           ics: googleEventToIcs(googleEvent, appleEvent.uid, appleEvent.alarms),
@@ -487,10 +489,17 @@ async function syncCalendarPair({
     const key = sourceKey(calendar.url, uid);
     operations.push({ type: 'create_icloud', calendar: mapping.icloudName, summary: googleEvent.summary, sourceKey: key, googleUpdated: googleEvent.updated || '' });
     if (!dryRun) {
-      await icloud.putCalendarObject({
-        url: eventHref(calendar, uid),
-        ics: googleEventToIcs(googleEvent, uid),
-        createOnly: true,
+      const href = eventHref(calendar, uid);
+      await putIcloudObject({ url: href, ics: googleEventToIcs(googleEvent, uid), createOnly: true });
+      // Hay que releer el objeto recien creado para conocer su huella real
+      // (incluye el etag que asigna iCloud, imposible de predecir de antemano).
+      // Si se deja en '', la siguiente pasada la compara contra la huella real
+      // y la ve siempre "cambiada", revirtiendo cualquier edicion hecha en
+      // Google entretanto aunque iCloud no se haya tocado.
+      const createdIcloudEvent = await fetchCreatedIcloudEvent(href, {
+        calendarName: calendar.name,
+        calendarUrl: calendar.url,
+        defaultTimeZone: process.env.TZ || 'Europe/Madrid',
       });
       await request('PATCH', `/calendars/${encodeURIComponent(mapping.googleCalendarId)}/events/${encodeURIComponent(googleEvent.id)}?sendUpdates=none`, token, {
         extendedProperties: { private: {
@@ -499,7 +508,7 @@ async function syncCalendarPair({
           belenciagaSourceKey: key,
           belenciagaIcloudUid: uid,
           belenciagaIcloudCalendar: mapping.icloudName,
-          belenciagaIcloudFingerprint: '',
+          belenciagaIcloudFingerprint: createdIcloudEvent?.fingerprint || '',
           belenciagaGoogleFingerprint: contentFingerprint(googleEvent),
         } },
       });
