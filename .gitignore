@@ -4,6 +4,7 @@
 *.key
 credentials/
 secrets/
+*-refresh-token.txt
 logs/
 node_modules/
 npm-debug.log*

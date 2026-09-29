@@ -54,6 +54,11 @@ jobs:
           CALENDAR_SYNC_WRITER_ID: github-actions-production
           CALENDAR_SYNC_LOCK_CALENDAR_ID: ${{ secrets.CALENDAR_SYNC_LOCK_CALENDAR_ID }}
           CALENDAR_SYNC_MAP_JSON: ${{ secrets.CALENDAR_SYNC_MAP_JSON }}
+          # Migracion controlada: ambos quedan desactivados mientras no se creen
+          # explicitamente estos secretos. No cambia el escritor actual al fusionar.
+          CALENDAR_SYNC_AUTODISCOVERY: ${{ secrets.CALENDAR_SYNC_AUTODISCOVERY || 'false' }}
+          CALENDAR_SYNC_CREATE_MISSING_CALENDARS: ${{ secrets.CALENDAR_SYNC_CREATE_MISSING_CALENDARS || 'false' }}
+          CALENDAR_SYNC_DENYLIST_JSON: ${{ secrets.CALENDAR_SYNC_DENYLIST_JSON }}
           CALENDAR_SYNC_EXPECTED_MAPPING_COUNT: ${{ secrets.CALENDAR_SYNC_EXPECTED_MAPPING_COUNT }}
           CALENDAR_SYNC_ENFORCE_ALLOWLIST: 'true'
           CALENDAR_SYNC_ALLOWED_ICLOUD_NAMES_JSON: ${{ secrets.CALENDAR_SYNC_ALLOWED_ICLOUD_NAMES_JSON }}
@@ -63,9 +68,22 @@ jobs:
           ICLOUD_USERNAME: ${{ secrets.ICLOUD_USERNAME }}
           ICLOUD_APP_PASSWORD: ${{ secrets.ICLOUD_APP_PASSWORD }}
           ICLOUD_CALDAV_BASE_URL: https://caldav.icloud.com/
+          ICLOUD_SYNC_ALL_CALENDARS: 'true'
           ICLOUD_SYNC_PAST_DAYS: '30'
-          ICLOUD_SYNC_FUTURE_DAYS: '365'
-          GOOGLE_CALENDAR_AUTH_MODE: service_account
+          ICLOUD_SYNC_FUTURE_DAYS: '730'
+          GOOGLE_CALENDAR_AUTH_MODE: ${{ secrets.GOOGLE_CALENDAR_AUTH_MODE || 'service_account' }}
           GOOGLE_CALENDAR_SCOPE: https://www.googleapis.com/auth/calendar
           GOOGLE_SERVICE_ACCOUNT_EMAIL: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_EMAIL }}
           GOOGLE_PRIVATE_KEY: ${{ secrets.GOOGLE_PRIVATE_KEY }}
+          GOOGLE_CALENDAR_CLIENT_ID: ${{ secrets.GOOGLE_CALENDAR_CLIENT_ID }}
+          GOOGLE_CALENDAR_CLIENT_SECRET: ${{ secrets.GOOGLE_CALENDAR_CLIENT_SECRET }}
+          GOOGLE_CALENDAR_REFRESH_TOKEN: ${{ secrets.GOOGLE_CALENDAR_REFRESH_TOKEN }}
+          # Teams muestra el calendario de Outlook/Exchange. Esta integracion se
+          # ejecuta dentro del mismo lease y solo para el calendario iCloud uni.
+          TEAMS_UNIVERSITY_SYNC_ENABLED: ${{ secrets.TEAMS_UNIVERSITY_SYNC_ENABLED || 'false' }}
+          TEAMS_UNIVERSITY_ICLOUD_NAME: 'uni 🤓'
+          MICROSOFT_TENANT_ID: ${{ secrets.MICROSOFT_TENANT_ID }}
+          MICROSOFT_CLIENT_ID: ${{ secrets.MICROSOFT_CLIENT_ID }}
+          MICROSOFT_CLIENT_SECRET: ${{ secrets.MICROSOFT_CLIENT_SECRET }}
+          MICROSOFT_REFRESH_TOKEN: ${{ secrets.MICROSOFT_REFRESH_TOKEN }}
+          MICROSOFT_TEAMS_CALENDAR_ID: ${{ secrets.MICROSOFT_TEAMS_CALENDAR_ID }}

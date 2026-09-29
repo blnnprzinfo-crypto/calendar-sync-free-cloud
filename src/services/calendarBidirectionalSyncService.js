@@ -4,6 +4,8 @@ const { createHash, randomUUID } = require('node:crypto');
 const icloud = require('./icloudCalDavService');
 const googleAuth = require('./googleCalendarAuthService');
 const { backupBeforeDeletion } = require('./calendarDeletionBackup');
+const discoveryService = require('./calendarDiscoveryService');
+const { parseIcsEvents } = require('./calendarIcsEventParser');
 
 const GOOGLE_BASE = 'https://www.googleapis.com/calendar/v3';
 
@@ -57,6 +59,9 @@ function parseJsonAllowlist(name) {
 }
 
 function enforceCalendarAllowlist(mappings) {
+  // In discovery mode the denylist, editability checks and ambiguity checks are
+  // the safety boundary; requiring a second static allowlist would defeat it.
+  if (process.env.CALENDAR_SYNC_AUTODISCOVERY === 'true') return;
   if (process.env.CALENDAR_SYNC_ENFORCE_ALLOWLIST !== 'true') return;
   const icloudNames = parseJsonAllowlist('CALENDAR_SYNC_ALLOWED_ICLOUD_NAMES_JSON');
   const googleIds = parseJsonAllowlist('CALENDAR_SYNC_ALLOWED_GOOGLE_IDS_JSON');
@@ -98,11 +103,11 @@ function getCalendarMap() {
   return mappings;
 }
 
-async function googleRequest(method, path, token, body = null) {
+async function googleRequest(method, path, token, body = null, extraHeaders = {}) {
   const response = await fetch(`${GOOGLE_BASE}${path}`, {
     method,
     signal: AbortSignal.timeout(30_000),
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...extraHeaders },
     body: body == null ? undefined : JSON.stringify(body),
   });
   const text = await response.text();
@@ -142,6 +147,7 @@ function comparableEvent(event) {
     end: event?.end || null,
     recurrence: Array.isArray(event?.recurrence) ? event.recurrence : [],
     status: event?.status === 'cancelled' ? 'cancelled' : 'confirmed',
+    transparency: event?.transparency === 'transparent' ? 'transparent' : 'opaque',
   };
 }
 
@@ -196,7 +202,7 @@ function toIcsDateValue(value, fallbackTimezone = 'Europe/Madrid') {
   return { line: `;TZID=${value.timeZone || fallbackTimezone}:${raw}`, allDay: false };
 }
 
-function googleEventToIcs(event, uid, alarms = []) {
+function googleEventToIcs(event, uid, alarms = [], preservedProperties = []) {
   const now = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
   const start = toIcsDateValue(event.start);
   const end = toIcsDateValue(event.end);
@@ -217,7 +223,18 @@ function googleEventToIcs(event, uid, alarms = []) {
   ];
   if (event.description) lines.push(`DESCRIPTION:${escapeIcs(event.description)}`);
   if (event.location) lines.push(`LOCATION:${escapeIcs(event.location)}`);
-  lines.push(...recurrence, 'STATUS:CONFIRMED', ...alarms.flat(), 'END:VEVENT', 'END:VCALENDAR', '');
+  const managed = /^(?:UID|DTSTAMP|LAST-MODIFIED|DTSTART|DTEND|DURATION|SUMMARY|DESCRIPTION|LOCATION|RRULE|EXDATE|STATUS|SEQUENCE|TRANSP|RECURRENCE-ID)(?:;|:)/i;
+  const safePreserved = preservedProperties.filter(line => typeof line === 'string'
+    && !managed.test(line)
+    && !/^BEGIN:|^END:/i.test(line));
+  lines.push(
+    ...recurrence,
+    `TRANSP:${event.transparency === 'transparent' ? 'TRANSPARENT' : 'OPAQUE'}`,
+    `STATUS:${event.status === 'cancelled' ? 'CANCELLED' : 'CONFIRMED'}`,
+    ...safePreserved,
+    ...alarms.flat(),
+    'END:VEVENT', 'END:VCALENDAR', '',
+  );
   return lines.join('\r\n');
 }
 
@@ -240,8 +257,8 @@ function buildGoogleFromIcloud(event, googleFingerprint = '') {
     start,
     end,
     recurrence: event.recurrence?.length ? event.recurrence : undefined,
-    status: 'confirmed',
-    transparency: 'opaque',
+    status: event.status === 'cancelled' ? 'cancelled' : 'confirmed',
+    transparency: event.transparency === 'transparent' ? 'transparent' : 'opaque',
     extendedProperties: { private: {
       belenciagaSource: 'icloud-caldav-bidirectional',
       belenciagaSourceKey: event.sourceKey,
@@ -268,6 +285,65 @@ async function listGoogleEvents({ token, calendarId, start, end, request = googl
     pageToken = data?.nextPageToken || '';
   } while (pageToken);
   return items;
+}
+
+function fingerprintGeneratedIcs(icsText, calendar, uid) {
+  return parseIcsEvents(icsText, {
+    calendarName: calendar.name,
+    calendarUrl: calendar.url,
+    defaultTimeZone: process.env.TZ || 'Europe/Madrid',
+  }).find(event => event.uid === uid)?.fingerprint || '';
+}
+
+async function findGoogleBySourceKey({ token, calendarId, key, request = googleRequest }) {
+  const params = new URLSearchParams({
+    maxResults: '10', showDeleted: 'true', singleEvents: 'false',
+    privateExtendedProperty: `belenciagaSourceKey=${key}`,
+  });
+  const data = await request('GET', `/calendars/${encodeURIComponent(calendarId)}/events?${params}`, token);
+  const matches = (data?.items || []).filter(event => privateProps(event).belenciagaSourceKey === key);
+  if (matches.length > 1) throw new Error('Hay varias copias Google gestionadas para la misma clave fuera de ventana.');
+  return matches[0] || null;
+}
+
+async function resolveMappings({ discoveredIcloud, token, request, dryRun }) {
+  if (process.env.CALENDAR_SYNC_AUTODISCOVERY !== 'true') {
+    return { mappings: getCalendarMap(), diagnostics: [], plannedCreations: [] };
+  }
+  const config = discoveryService.readDiscoveryConfig();
+  const googleCalendars = await discoveryService.listGoogleCalendars({ token, request });
+  const plan = discoveryService.buildDiscoveryPlan({
+    icloudCalendars: discoveredIcloud,
+    googleCalendars,
+    ...config,
+  });
+  if (plan.diagnostics.some(item => item.severity === 'error')) {
+    const error = new Error('Autodescubrimiento bloqueado por coincidencias ambiguas o de solo lectura.');
+    error.diagnostics = plan.diagnostics;
+    throw error;
+  }
+  const mappings = [...plan.mappings];
+  if (!dryRun && config.createMissing) {
+    for (const item of plan.createGoogle) {
+      const created = await request('POST', '/calendars', token, { summary: item.name });
+      if (!created?.id) throw new Error('Google no devolvio el ID del calendario creado.');
+      mappings.push({ icloudName: item.name, googleCalendarId: created.id, source: 'created-google' });
+    }
+    for (const item of plan.createIcloud) {
+      const created = await icloud.createCalendar({ name: item.name });
+      discoveredIcloud.push(created);
+      mappings.push({ icloudName: created.name, googleCalendarId: item.googleCalendarId, source: 'created-icloud' });
+    }
+  }
+  enforceCalendarAllowlist(mappings);
+  return {
+    mappings,
+    diagnostics: plan.diagnostics,
+    plannedCreations: [
+      ...plan.createGoogle.map(() => ({ side: 'google' })),
+      ...plan.createIcloud.map(() => ({ side: 'icloud' })),
+    ],
+  };
 }
 
 function parseIcloudTimestamp(raw) {
@@ -332,7 +408,17 @@ async function syncCalendarPair({
 
   for (const appleEvent of icloudEvents) {
     if (deletedAppleKeys.has(appleEvent.sourceKey)) continue;
-    const googleEvent = googleByKey.get(appleEvent.sourceKey);
+    if (appleEvent.recurrenceId) {
+      operations.push({ type: 'skip_complex_recurrence', calendar: mapping.icloudName, sourceKey: appleEvent.sourceKey });
+      continue;
+    }
+    let googleEvent = googleByKey.get(appleEvent.sourceKey);
+    if (!googleEvent) {
+      googleEvent = await findGoogleBySourceKey({
+        token, calendarId: mapping.googleCalendarId, key: appleEvent.sourceKey, request,
+      });
+      if (googleEvent) googleByKey.set(appleEvent.sourceKey, googleEvent);
+    }
     if (!googleEvent) {
       let candidates = (unlinkedByLooseFingerprint.get(looseFingerprint(appleEvent)) || [])
         .filter(candidate => !consumedGoogleIds.has(candidate.id));
@@ -355,7 +441,7 @@ async function syncCalendarPair({
               belenciagaIcloudFingerprint: appleEvent.fingerprint,
               belenciagaGoogleFingerprint: contentFingerprint(candidate),
             } },
-          });
+          }, candidate.etag ? { 'If-Match': candidate.etag } : {});
         }
         continue;
       }
@@ -368,7 +454,7 @@ async function syncCalendarPair({
               ...privateProps(created),
               belenciagaGoogleFingerprint: contentFingerprint(created),
             } },
-          });
+          }, created.etag ? { 'If-Match': created.etag } : {});
         }
       }
       continue;
@@ -409,7 +495,9 @@ async function syncCalendarPair({
       continue;
     }
     const props = privateProps(googleEvent);
-    const appleChanged = props.belenciagaIcloudFingerprint !== appleEvent.fingerprint;
+    const legacyAppleMatch = appleEvent.transparency !== 'transparent'
+      && props.belenciagaIcloudFingerprint === appleEvent.legacyFingerprint;
+    const appleChanged = props.belenciagaIcloudFingerprint !== appleEvent.fingerprint && !legacyAppleMatch;
     const currentGoogleFingerprint = contentFingerprint(googleEvent);
     const googleChanged = Boolean(props.belenciagaGoogleFingerprint)
       && props.belenciagaGoogleFingerprint !== currentGoogleFingerprint
@@ -420,21 +508,33 @@ async function syncCalendarPair({
     }
     const winner = appleChanged && googleChanged ? selectConflictWinner(appleEvent, googleEvent) : (googleChanged ? 'google' : 'icloud');
     if (winner === 'google') {
-      operations.push({ type: 'update_icloud', calendar: mapping.icloudName, summary: googleEvent.summary, sourceKey: appleEvent.sourceKey, googleUpdated: googleEvent.updated || '' });
       if (!dryRun) {
+        const eventPath = `/calendars/${encodeURIComponent(mapping.googleCalendarId)}/events/${encodeURIComponent(googleEvent.id)}`;
+        const fresh = await request('GET', eventPath, token);
+        if (googleEvent.etag && fresh?.etag !== googleEvent.etag) {
+          operations.push({ type: 'skip_google_changed_during_run', calendar: mapping.icloudName, sourceKey: appleEvent.sourceKey });
+          continue;
+        }
+        const ics = googleEventToIcs(fresh || googleEvent, appleEvent.uid, appleEvent.alarms, appleEvent.preservedProperties);
+        const expectedIcloudFingerprint = fingerprintGeneratedIcs(ics, calendar, appleEvent.uid);
         await icloud.putCalendarObject({
           url: appleEvent.href,
           etag: appleEvent.etag,
-          ics: googleEventToIcs(googleEvent, appleEvent.uid, appleEvent.alarms),
+          ics,
         });
         await request('PATCH', `/calendars/${encodeURIComponent(mapping.googleCalendarId)}/events/${encodeURIComponent(googleEvent.id)}?sendUpdates=none`, token, {
-          extendedProperties: { private: { ...props, belenciagaGoogleFingerprint: currentGoogleFingerprint } },
-        });
+          extendedProperties: { private: {
+            ...props,
+            belenciagaIcloudFingerprint: expectedIcloudFingerprint,
+            belenciagaGoogleFingerprint: contentFingerprint(fresh || googleEvent),
+          } },
+        }, fresh?.etag ? { 'If-Match': fresh.etag } : {});
       }
+      operations.push({ type: 'update_icloud', calendar: mapping.icloudName, summary: googleEvent.summary, sourceKey: appleEvent.sourceKey, googleUpdated: googleEvent.updated || '' });
     } else {
       operations.push({ type: 'update_google', calendar: mapping.icloudName, summary: appleEvent.summary, sourceKey: appleEvent.sourceKey, googleUpdated: googleEvent.updated || '' });
       if (!dryRun) {
-        const updated = await request('PATCH', `/calendars/${encodeURIComponent(mapping.googleCalendarId)}/events/${encodeURIComponent(googleEvent.id)}?sendUpdates=none`, token, buildGoogleFromIcloud(appleEvent));
+        const updated = await request('PATCH', `/calendars/${encodeURIComponent(mapping.googleCalendarId)}/events/${encodeURIComponent(googleEvent.id)}?sendUpdates=none`, token, buildGoogleFromIcloud(appleEvent), googleEvent.etag ? { 'If-Match': googleEvent.etag } : {});
         // Google normaliza el evento al guardarlo, asi que la huella se toma de
         // lo que Google devuelve, no de lo que le enviamos.
         if (updated?.id) {
@@ -443,7 +543,7 @@ async function syncCalendarPair({
               ...privateProps(updated),
               belenciagaGoogleFingerprint: contentFingerprint(updated),
             } },
-          });
+          }, updated.etag ? { 'If-Match': updated.etag } : {});
         }
       }
     }
@@ -467,7 +567,7 @@ async function syncCalendarPair({
           summary: googleEvent.summary, sourceKey: linkedKey, googleUpdated: googleEvent.updated || '',
         });
         if (!dryRun) {
-          await request('DELETE', `/calendars/${encodeURIComponent(mapping.googleCalendarId)}/events/${encodeURIComponent(googleEvent.id)}?sendUpdates=none`, token);
+          await request('DELETE', `/calendars/${encodeURIComponent(mapping.googleCalendarId)}/events/${encodeURIComponent(googleEvent.id)}?sendUpdates=none`, token, null, googleEvent.etag ? { 'If-Match': googleEvent.etag } : {});
         }
         continue;
       }
@@ -479,7 +579,7 @@ async function syncCalendarPair({
         summary: googleEvent.summary, sourceKey: linkedKey, googleUpdated: googleEvent.updated || '',
       });
       if (!dryRun) {
-        await request('DELETE', `/calendars/${encodeURIComponent(mapping.googleCalendarId)}/events/${encodeURIComponent(googleEvent.id)}?sendUpdates=none`, token);
+        await request('DELETE', `/calendars/${encodeURIComponent(mapping.googleCalendarId)}/events/${encodeURIComponent(googleEvent.id)}?sendUpdates=none`, token, null, googleEvent.etag ? { 'If-Match': googleEvent.etag } : {});
       }
       continue;
     }
@@ -487,9 +587,11 @@ async function syncCalendarPair({
     const key = sourceKey(calendar.url, uid);
     operations.push({ type: 'create_icloud', calendar: mapping.icloudName, summary: googleEvent.summary, sourceKey: key, googleUpdated: googleEvent.updated || '' });
     if (!dryRun) {
+      const ics = googleEventToIcs(googleEvent, uid);
+      const expectedIcloudFingerprint = fingerprintGeneratedIcs(ics, calendar, uid);
       await icloud.putCalendarObject({
         url: eventHref(calendar, uid),
-        ics: googleEventToIcs(googleEvent, uid),
+        ics,
         createOnly: true,
       });
       await request('PATCH', `/calendars/${encodeURIComponent(mapping.googleCalendarId)}/events/${encodeURIComponent(googleEvent.id)}?sendUpdates=none`, token, {
@@ -499,10 +601,10 @@ async function syncCalendarPair({
           belenciagaSourceKey: key,
           belenciagaIcloudUid: uid,
           belenciagaIcloudCalendar: mapping.icloudName,
-          belenciagaIcloudFingerprint: '',
+          belenciagaIcloudFingerprint: expectedIcloudFingerprint,
           belenciagaGoogleFingerprint: contentFingerprint(googleEvent),
         } },
-      });
+      }, googleEvent.etag ? { 'If-Match': googleEvent.etag } : {});
     }
   }
   return operations;
@@ -519,12 +621,13 @@ async function syncBidirectional(options = {}) {
   const pruneManagedGoogleOrphans = options.pruneManagedGoogleOrphans
     ?? process.env.CALENDAR_SYNC_PRUNE_MANAGED_GOOGLE_ORPHANS === 'true';
   const conflictPolicy = getConflictPolicy();
-  const mappings = getCalendarMap();
   const { start, end } = getWindow(options.now || new Date());
   const discovered = await icloud.discoverCalendars();
-  const calendarByName = new Map(discovered.map(calendar => [normalizeName(calendar.name), calendar]));
   const token = options.tokenOverride || await googleAuth.getAccessToken();
   const request = options.googleRequestOverride || googleRequest;
+  const resolution = await resolveMappings({ discoveredIcloud: discovered, token, request, dryRun });
+  const mappings = resolution.mappings;
+  const calendarByName = new Map(discovered.map(calendar => [normalizeName(calendar.name), calendar]));
   const allOperations = [];
 
   for (const mapping of mappings) {
@@ -552,6 +655,8 @@ async function syncBidirectional(options = {}) {
     conflictPolicy,
     window: { start: start.toISOString(), end: end.toISOString() },
     calendars: mappings.map(item => item.icloudName),
+    diagnostics: resolution.diagnostics,
+    plannedCreations: resolution.plannedCreations,
     counts,
     operations: allOperations,
   };
@@ -566,5 +671,5 @@ module.exports = {
   summaryDateKey,
   googleEventToIcs,
   selectConflictWinner,
-  _private: { buildGoogleFromIcloud, sourceKey, syncCalendarPair, normalizeName, legacyContentFingerprint, canonicalTime, isManagedGoogleCopyForMapping },
+  _private: { buildGoogleFromIcloud, sourceKey, syncCalendarPair, normalizeName, legacyContentFingerprint, canonicalTime, isManagedGoogleCopyForMapping, resolveMappings, findGoogleBySourceKey, fingerprintGeneratedIcs },
 };
