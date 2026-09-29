@@ -1,5 +1,6 @@
 'use strict';
 
+const { randomUUID } = require('node:crypto');
 const { XMLParser } = require('fast-xml-parser');
 const { parseIcsEvents } = require('./calendarIcsEventParser');
 
@@ -235,6 +236,24 @@ async function discoverCalendars() {
     });
 }
 
+function escapeXml(value) {
+  return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+}
+
+async function createCalendar({ name }) {
+  if (!String(name || '').trim()) throw new Error('El nuevo calendario iCloud necesita nombre.');
+  const baseUrl = getBaseUrl();
+  const principalUrl = await discoverPrincipal(baseUrl);
+  const homeUrl = await discoverCalendarHome(baseUrl, principalUrl);
+  const url = normalizeUrl(homeUrl, `${randomUUID()}/`);
+  const body = `<?xml version="1.0" encoding="UTF-8"?>\n<c:mkcalendar xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:set><d:prop><d:displayname>${escapeXml(name)}</d:displayname><c:supported-calendar-component-set><c:comp name="VEVENT"/></c:supported-calendar-component-set></d:prop></d:set></c:mkcalendar>`;
+  await caldavRequest('MKCALENDAR', url, body);
+  const matches = (await discoverCalendars()).filter(calendar => calendar.url === url || calendar.name === name);
+  if (matches.length !== 1) throw new Error('iCloud creo el calendario pero no pudo verificarse de forma univoca.');
+  return matches[0];
+}
+
 async function getSelectedCalendars() {
   const configuredUrls = splitList(process.env.ICLOUD_CALENDAR_URLS);
   if (configuredUrls.length > 0) {
@@ -306,6 +325,7 @@ module.exports = {
   putCalendarObject,
   deleteCalendarObject,
   calendarObjectExists,
+  createCalendar,
   _private: {
     caldavRequest,
     calendarReport,

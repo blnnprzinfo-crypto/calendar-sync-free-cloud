@@ -7,6 +7,7 @@ const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const { execFile } = require('node:child_process');
 const { syncBidirectional } = require('../../../src/services/calendarBidirectionalSyncService');
+const { syncUniversityTeams } = require('../../../src/services/teamsUniversityCalendarSyncService');
 const { createRemoteLease } = require('../../../src/services/calendarSyncRemoteLease');
 
 const ROOT = path.resolve(__dirname, '..', '..', '..');
@@ -23,6 +24,8 @@ function redact(value) {
     'CALENDAR_SYNC_LOCK_CALENDAR_ID', 'GOOGLE_CALENDAR_CLIENT_ID',
     'GOOGLE_CALENDAR_CLIENT_SECRET', 'GOOGLE_CALENDAR_REFRESH_TOKEN',
     'GOOGLE_SERVICE_ACCOUNT_EMAIL', 'GOOGLE_PRIVATE_KEY',
+    'MICROSOFT_CLIENT_ID', 'MICROSOFT_CLIENT_SECRET', 'MICROSOFT_REFRESH_TOKEN',
+    'MICROSOFT_TEAMS_CALENDAR_ID',
   ];
   for (const name of sensitiveNames) {
     const secret = process.env[name];
@@ -104,9 +107,14 @@ async function syncOnce({ dryRun, compact, mode }) {
   const startedAt = Date.now();
   const result = await syncBidirectional({ dryRun });
   print(result, { compact });
-  writeHeartbeat('ok', { mode, dryRun, durationMs: Date.now() - startedAt, counts: result.counts });
+  const teams = await syncUniversityTeams({ dryRun });
+  if (teams.enabled) log('INFO', 'Sincronizacion universitaria con Teams completada.', { counts: teams.counts });
+  writeHeartbeat('ok', {
+    mode, dryRun, durationMs: Date.now() - startedAt, counts: result.counts,
+    diagnostics: result.diagnostics || [], teams: { enabled: teams.enabled, counts: teams.counts },
+  });
   systemdNotify('WATCHDOG=1');
-  return result;
+  return { ...result, teams };
 }
 
 async function shutdown(signal, exitCode = 0) {

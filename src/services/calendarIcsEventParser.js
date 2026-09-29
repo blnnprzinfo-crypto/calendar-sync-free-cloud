@@ -151,6 +151,10 @@ function normalizeEvent(raw, meta = {}) {
     description: unescapeIcsText(getFirst(raw, 'DESCRIPTION')?.value || ''),
     location: unescapeIcsText(getFirst(raw, 'LOCATION')?.value || ''),
     status: String(getFirst(raw, 'STATUS')?.value || '').toLowerCase(),
+    transparency: String(getFirst(raw, 'TRANSP')?.value || 'OPAQUE').toUpperCase() === 'TRANSPARENT'
+      ? 'transparent'
+      : 'opaque',
+    recurrenceId: getFirst(raw, 'RECURRENCE-ID')?.value || '',
     sequence: Number.parseInt(getFirst(raw, 'SEQUENCE')?.value || '0', 10) || 0,
     lastModified: getFirst(raw, 'LAST-MODIFIED')?.value || getFirst(raw, 'DTSTAMP')?.value || '',
     start,
@@ -161,11 +165,29 @@ function normalizeEvent(raw, meta = {}) {
     href: meta.href || '',
     etag: meta.etag || '',
     alarms: raw.__alarms || [],
+    preservedProperties: raw.__rawProperties || [],
   };
 
   const sourceBase = event.calendarUrl || event.calendarName || 'icloud';
   event.sourceKey = sha1(`${sourceBase}|${event.uid}`);
-  event.fingerprint = sha1(JSON.stringify({
+  const contentFingerprint = {
+    uid: event.uid,
+    summary: event.summary,
+    description: event.description,
+    location: event.location,
+    status: event.status,
+    sequence: event.sequence,
+    transparency: event.transparency,
+    start: event.start,
+    end: event.end,
+    recurrence: event.recurrence,
+    alarms: event.alarms,
+  };
+  event.fingerprint = sha1(JSON.stringify(contentFingerprint));
+  // Temporary compatibility value. Existing managed events may still contain the
+  // pre-v2 fingerprint, which included transport metadata. It is only accepted for
+  // opaque events by the synchronizer so transparent events are repaired once.
+  event.legacyFingerprint = sha1(JSON.stringify({
     uid: event.uid,
     summary: event.summary,
     description: event.description,
@@ -190,7 +212,7 @@ function parseIcsEvents(text, meta = {}) {
 
   for (const line of lines) {
     if (line === 'BEGIN:VEVENT') {
-      current = {};
+      current = { __rawProperties: [] };
       alarm = null;
       continue;
     }
@@ -218,6 +240,7 @@ function parseIcsEvents(text, meta = {}) {
 
     const prop = parsePropertyLine(line);
     if (!prop) continue;
+    current.__rawProperties.push(line);
     if (!current[prop.name]) current[prop.name] = [];
     current[prop.name].push(prop);
   }

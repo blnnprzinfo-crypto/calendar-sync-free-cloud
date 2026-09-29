@@ -15,7 +15,12 @@ try {
     throw new Error(`heartbeat obsoleto: ${ageSeconds}s (maximo ${maxAgeSeconds}s)`);
   }
   if (heartbeat.status === 'error') throw new Error('el ultimo estado es error');
-  console.log(`[calendar-health] OK age=${ageSeconds}s status=${heartbeat.status} mode=${heartbeat.mode || 'unknown'}`);
+  const diagnostics = Array.isArray(heartbeat.diagnostics) ? heartbeat.diagnostics : [];
+  const blocking = diagnostics.filter(item => item?.severity === 'error').length;
+  if (blocking) throw new Error(`autodescubrimiento bloqueado (${blocking} diagnosticos)`);
+  const warnings = diagnostics.filter(item => item?.severity === 'warning').length;
+  const teams = heartbeat.teams?.enabled ? 'enabled' : 'disabled';
+  console.log(`[calendar-health] OK age=${ageSeconds}s status=${heartbeat.status} mode=${heartbeat.mode || 'unknown'} warnings=${warnings} teams=${teams}`);
 } catch (error) {
   console.error(`[calendar-health] FAIL ${error.message}`);
   process.exit(1);
