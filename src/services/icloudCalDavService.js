@@ -168,6 +168,15 @@ async function calendarReport(url, start, end) {
   return caldavRequest('REPORT', url, body, { Depth: '1' });
 }
 
+async function pingIcloud({ caldavRequest: request = caldavRequest, baseUrl = getBaseUrl() } = {}) {
+  const body = `<?xml version="1.0" encoding="utf-8"?>
+<d:propfind xmlns:d="DAV:">
+  <d:prop><d:current-user-principal/></d:prop>
+</d:propfind>`;
+  await request('PROPFIND', baseUrl, body, { Depth: '0' });
+  return { ok: true };
+}
+
 function validateConfig() {
   const missing = [];
   if (!process.env.ICLOUD_USERNAME) missing.push('ICLOUD_USERNAME');
@@ -306,6 +315,7 @@ module.exports = {
   putCalendarObject,
   deleteCalendarObject,
   calendarObjectExists,
+  pingIcloud,
   _private: {
     caldavRequest,
     calendarReport,
