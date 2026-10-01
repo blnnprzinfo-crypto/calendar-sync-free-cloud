@@ -69,3 +69,15 @@ jobs:
           GOOGLE_CALENDAR_SCOPE: https://www.googleapis.com/auth/calendar
           GOOGLE_SERVICE_ACCOUNT_EMAIL: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_EMAIL }}
           GOOGLE_PRIVATE_KEY: ${{ secrets.GOOGLE_PRIVATE_KEY }}
+      - name: Alert on sync failure
+        if: failure()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.CALENDAR_SYNC_ALERT_SMTP_USER }}
+          password: ${{ secrets.CALENDAR_SYNC_ALERT_SMTP_PASSWORD }}
+          to: ${{ secrets.CALENDAR_SYNC_ALERT_EMAIL_TO }}
+          from: Calendar Sync Bot <${{ secrets.CALENDAR_SYNC_ALERT_SMTP_USER }}>
+          subject: "[calendar-sync] FAILED - run ${{ github.run_id }}"
+          body: "calendar-sync.yml fallo en ${{ github.repository }}@${{ github.sha }}. https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"

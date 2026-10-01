@@ -28,3 +28,25 @@ checksum, a chunk count and `data0..N` chunks. Concatenate the chunks, base64
 decode and gunzip to recover JSON containing the original ICS, URL and ETag.
 Restoration must use create-only semantics to avoid overwriting a newer event.
 Backups remain in the technical calendar, never in public logs or artifacts.
+
+## Monitoring and alerts
+
+- `calendar-sync.yml` emails on `failure()` of its own job — a broken `npm
+  test`, a sync error, or a stale/error heartbeat caught by
+  `calendar-sync-healthcheck.js`. This only fires while the job itself runs.
+- `calendar-sync-remote-health.yml` runs hourly, independent of any single
+  sync job, and checks three things that a per-run heartbeat can never see:
+  whether GitHub actually fired `calendar-sync.yml` recently (catches
+  silent scheduling throttling on low-activity repos), whether the remote
+  lease looks claimed with no run in progress (a hard-killed job can leave
+  it dangling — this is a heuristic early warning, not a fix: the lease
+  self-heals once its TTL, default 600s, lapses regardless), and whether
+  iCloud CalDAV is reachable and authenticated (read-only probe, never
+  touches real calendar data). Run it on demand with
+  `npm run health:remote`, or trigger the GitHub Actions
+  `workflow_dispatch` with `simulate_failure: true` to fire a test alert
+  without exercising any real check.
+- Both alerts need three new repo secrets: `CALENDAR_SYNC_ALERT_SMTP_USER`
+  (the Gmail address used as SMTP login/From), `CALENDAR_SYNC_ALERT_SMTP_PASSWORD`
+  (a Gmail App Password, not the account password), and
+  `CALENDAR_SYNC_ALERT_EMAIL_TO` (the recipient).

@@ -32,6 +32,28 @@ function props(event) {
   return event?.extendedProperties?.private || {};
 }
 
+async function fetchLeaseEvent({ calendarId, token, httpRequest = request }) {
+  const eventPath = `/calendars/${encodeURIComponent(calendarId)}/events/${LOCK_EVENT_ID}`;
+  try {
+    return await httpRequest('GET', eventPath, token);
+  } catch (error) {
+    if (error.status === 404 || error.status === 410) return null;
+    throw error;
+  }
+}
+
+async function readLeaseState({ calendarId, token, request: httpRequest = request, getAccessToken = googleAuth.getAccessToken } = {}) {
+  const resolvedCalendarId = String(calendarId || process.env.CALENDAR_SYNC_LOCK_CALENDAR_ID || '').trim();
+  if (!resolvedCalendarId) throw new Error('Falta CALENDAR_SYNC_LOCK_CALENDAR_ID para leer el lease.');
+  const resolvedToken = token || await getAccessToken();
+  const event = await fetchLeaseEvent({ calendarId: resolvedCalendarId, token: resolvedToken, httpRequest });
+  if (!event) return { exists: false, owner: null, expiresAt: null, expiresAtMs: 0, isClaimed: false };
+  const owner = props(event).belenciagaCalendarSyncOwner || null;
+  const expiresAt = props(event).belenciagaCalendarSyncExpiresAt || null;
+  const expiresAtMs = Date.parse(expiresAt || '') || 0;
+  return { exists: true, owner, expiresAt, expiresAtMs, isClaimed: expiresAtMs > Date.now() };
+}
+
 function lockBody(owner, expiresAt, existing = {}) {
   return {
     id: LOCK_EVENT_ID,
@@ -69,12 +91,7 @@ function createRemoteLease(options = {}) {
   const eventPath = `/calendars/${encodeURIComponent(calendarId)}/events/${LOCK_EVENT_ID}`;
 
   async function load() {
-    try {
-      return await httpRequest('GET', eventPath, token);
-    } catch (error) {
-      if (error.status === 404 || error.status === 410) return null;
-      throw error;
-    }
+    return fetchLeaseEvent({ calendarId, token, httpRequest });
   }
 
   async function claim(attempt = 1) {
@@ -149,4 +166,4 @@ function createRemoteLease(options = {}) {
   return { acquire, release };
 }
 
-module.exports = { createRemoteLease, _private: { LOCK_EVENT_ID, lockBody, props } };
+module.exports = { createRemoteLease, readLeaseState, _private: { LOCK_EVENT_ID, lockBody, props, fetchLeaseEvent } };
