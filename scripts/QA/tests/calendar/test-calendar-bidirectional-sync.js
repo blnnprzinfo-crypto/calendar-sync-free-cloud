@@ -178,6 +178,65 @@ async function run() {
     assert.deepEqual(operations.map(item => item.type), ['create_icloud']);
   });
 
+  await test('al crear en iCloud, guarda la huella real releyendo el objeto (no una cadena vacia)', async () => {
+    // Regresion: si belenciagaIcloudFingerprint se deja en '', la siguiente
+    // pasada la ve siempre "cambiada" frente a la huella real y puede revertir
+    // una edicion legitima hecha en Google mientras tanto.
+    const calendar = { name: 'tatuajes', url: 'https://icloud.test/cal/' };
+    const source = googleEvent({ id: 'google-new-1' });
+    const calls = [];
+    const request = async (method, path, token, body) => {
+      calls.push({ method, path, body });
+      return method === 'GET' ? { items: [source] } : { id: source.id };
+    };
+    const operations = await service._private.syncCalendarPair({
+      mapping: { icloudName: 'tatuajes', googleCalendarId: 'g1' }, calendar,
+      icloudEvents: [], token: 'token', start: new Date('2026-08-01Z'), end: new Date('2026-09-01Z'),
+      dryRun: false, request,
+      putIcloudObject: async () => ({ ok: true }),
+      fetchCreatedIcloudEvent: async () => ({ fingerprint: 'huella-real-tras-releer-icloud' }),
+    });
+    assert.deepEqual(operations.map(item => item.type), ['create_icloud']);
+    const patchCalls = calls.filter(call => call.method === 'PATCH');
+    assert.equal(patchCalls.length, 1);
+    assert.equal(
+      patchCalls[0].body.extendedProperties.private.belenciagaIcloudFingerprint,
+      'huella-real-tras-releer-icloud'
+    );
+  });
+
+  await test('no revierte una edicion en Google hecha justo tras crear el evento en iCloud', async () => {
+    // Reproduce el fallo real observado en produccion: un evento nacido en
+    // Google se enlaza a iCloud, y si alguien lo edita en Google poco despues,
+    // la siguiente pasada debe propagar esa edicion (update_icloud), nunca
+    // revertirla sobreescribiendo Google con el contenido antiguo de iCloud.
+    const calendar = { name: 'tatuajes', url: 'https://icloud.test/cal/' };
+    const uid = 'belenciaga-google-recent-1';
+    const key = service._private.sourceKey(calendar.url, uid);
+    const realIcloudFingerprint = 'huella-real-tras-releer-icloud';
+    const originalFingerprint = service.contentFingerprint(googleEvent());
+    const editedInGoogle = googleEvent({
+      summary: 'Editada justo despues de crear',
+      extendedProperties: { private: {
+        belenciagaSource: 'google-calendar-bidirectional',
+        belenciagaSourceKey: key,
+        belenciagaIcloudUid: uid,
+        belenciagaIcloudCalendar: 'tatuajes',
+        belenciagaIcloudFingerprint: realIcloudFingerprint,
+        belenciagaGoogleFingerprint: originalFingerprint,
+      } },
+    });
+    const appleCopy = appleEvent({ uid, sourceKey: key, fingerprint: realIcloudFingerprint });
+    const request = async method => method === 'GET' ? { items: [editedInGoogle] } : {};
+    const operations = await service._private.syncCalendarPair({
+      mapping: { icloudName: 'tatuajes', googleCalendarId: 'g1' }, calendar,
+      icloudEvents: [appleCopy], token: 'token',
+      start: new Date('2026-08-01Z'), end: new Date('2026-09-01Z'),
+      dryRun: true, request,
+    });
+    assert.deepEqual(operations.map(item => item.type), ['update_icloud']);
+  });
+
   await test('por defecto conserva una copia Google enlazada cuyo original no aparece', async () => {
     const uid = 'icloud-missing-1';
     const calendar = { name: 'tatuajes', url: 'https://icloud.test/cal/' };
