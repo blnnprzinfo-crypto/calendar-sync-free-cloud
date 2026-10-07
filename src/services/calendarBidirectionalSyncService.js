@@ -142,6 +142,7 @@ function comparableEvent(event) {
     end: event?.end || null,
     recurrence: Array.isArray(event?.recurrence) ? event.recurrence : [],
     status: event?.status === 'cancelled' ? 'cancelled' : 'confirmed',
+    transparency: event?.transparency === 'transparent' ? 'transparent' : 'opaque',
   };
 }
 
@@ -157,7 +158,8 @@ function contentFingerprint(event) {
 // Huella anterior al arreglo de zonas horarias. Solo se usa para reconocer los
 // eventos ya sincronizados con el formato viejo y no reescribirlos sin motivo.
 function legacyContentFingerprint(event) {
-  return sha1(JSON.stringify(comparableEvent(event)));
+  const { transparency: _transparency, ...legacyComparable } = comparableEvent(event);
+  return sha1(JSON.stringify(legacyComparable));
 }
 
 function looseFingerprint(event) {
@@ -214,6 +216,7 @@ function googleEventToIcs(event, uid, alarms = []) {
     `DTSTART${start.line}`,
     `DTEND${end.line}`,
     `SUMMARY:${escapeIcs(event.summary || 'ocupado')}`,
+    event.transparency === 'transparent' ? 'TRANSP:TRANSPARENT' : 'TRANSP:OPAQUE',
   ];
   if (event.description) lines.push(`DESCRIPTION:${escapeIcs(event.description)}`);
   if (event.location) lines.push(`LOCATION:${escapeIcs(event.location)}`);
@@ -241,7 +244,7 @@ function buildGoogleFromIcloud(event, googleFingerprint = '') {
     end,
     recurrence: event.recurrence?.length ? event.recurrence : undefined,
     status: 'confirmed',
-    transparency: 'opaque',
+    transparency: event.transparency === 'transparent' ? 'transparent' : 'opaque',
     extendedProperties: { private: {
       belenciagaSource: 'icloud-caldav-bidirectional',
       belenciagaSourceKey: event.sourceKey,
@@ -409,11 +412,16 @@ async function syncCalendarPair({
       continue;
     }
     const props = privateProps(googleEvent);
-    const appleChanged = props.belenciagaIcloudFingerprint !== appleEvent.fingerprint;
+    const transparencyMismatch = comparableEvent(appleEvent).transparency !== comparableEvent(googleEvent).transparency;
+    const appleMatchesCurrent = props.belenciagaIcloudFingerprint === appleEvent.fingerprint;
+    const appleMatchesLegacy = props.belenciagaIcloudFingerprint === appleEvent.legacyFingerprint;
+    const appleChanged = (!appleMatchesCurrent && !appleMatchesLegacy)
+      || (appleMatchesLegacy && transparencyMismatch);
     const currentGoogleFingerprint = contentFingerprint(googleEvent);
+    const googleMatchesCurrent = props.belenciagaGoogleFingerprint === currentGoogleFingerprint;
+    const googleMatchesLegacy = props.belenciagaGoogleFingerprint === legacyContentFingerprint(googleEvent);
     const googleChanged = Boolean(props.belenciagaGoogleFingerprint)
-      && props.belenciagaGoogleFingerprint !== currentGoogleFingerprint
-      && props.belenciagaGoogleFingerprint !== legacyContentFingerprint(googleEvent);
+      && ((!googleMatchesCurrent && !googleMatchesLegacy) || (googleMatchesLegacy && transparencyMismatch));
     if (!appleChanged && !googleChanged) {
       operations.push({ type: 'skip_unchanged', calendar: mapping.icloudName, summary: appleEvent.summary, sourceKey: appleEvent.sourceKey, googleUpdated: googleEvent.updated || '' });
       continue;

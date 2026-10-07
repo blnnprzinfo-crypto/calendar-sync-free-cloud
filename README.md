@@ -4,6 +4,19 @@ Minimal bidirectional bridge between iCloud CalDAV and Google Calendar. It runs
 as a one-shot GitHub Actions job on a standard public-repository runner, which
 has no recurring compute charge.
 
+## Aules deadlines
+
+Set the private `AULES_ICS_URL` GitHub Actions secret to import Moodle/Aules
+deadlines into the existing university calendar. `AULES_TARGET_ICLOUD_NAME`
+selects that iCloud mapping and defaults to `Uni`; matching ignores case,
+accents and emoji decoration, but must resolve to exactly one entry in
+`CALENDAR_SYNC_MAP_JSON`.
+
+The same run follows **Aules → Google Uni → iCloud Uni**. Deadlines are created
+as all-day, free/transparent events so they do not block appointment systems.
+Aules is read-only: the importer never deletes Google events when a deadline
+disappears from the feed.
+
 Safety properties:
 
 - strict iCloud-name and Google-ID allowlists;

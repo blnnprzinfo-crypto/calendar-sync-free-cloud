@@ -123,6 +123,41 @@ async function run() {
     assert.match(ics, /DTSTART:20260820T080000Z/);
   });
 
+  await test('conserva transparency entre Google e ICS', () => {
+    const { parseIcsEvents } = require('../../../../src/services/calendarIcsEventParser');
+    const transparentIcs = service.googleEventToIcs(googleEvent({ transparency: 'transparent' }), 'transparent-1');
+    assert.match(transparentIcs, /TRANSP:TRANSPARENT/);
+    assert.equal(parseIcsEvents(transparentIcs)[0].transparency, 'transparent');
+    const opaqueIcs = transparentIcs.replace('TRANSP:TRANSPARENT', 'TRANSP:OPAQUE');
+    assert.equal(parseIcsEvents(opaqueIcs)[0].transparency, 'opaque');
+  });
+
+  await test('buildGoogleFromIcloud respeta transparency', () => {
+    assert.equal(service._private.buildGoogleFromIcloud(appleEvent({ transparency: 'transparent' })).transparency, 'transparent');
+  });
+
+  await test('la huella antigua sin transparency sigue reconocida', async () => {
+    const { parseIcsEvents } = require('../../../../src/services/calendarIcsEventParser');
+    const apple = parseIcsEvents(service.googleEventToIcs(googleEvent({ transparency: 'transparent' }), 'legacy-transp'), {
+      calendarName: 'tatuajes', calendarUrl: 'https://icloud.test/cal/',
+    })[0];
+    const google = googleEvent({
+      transparency: 'transparent',
+      extendedProperties: { private: {
+        belenciagaSourceKey: apple.sourceKey,
+        belenciagaIcloudFingerprint: apple.legacyFingerprint,
+        belenciagaGoogleFingerprint: service._private.legacyContentFingerprint(googleEvent({ transparency: 'transparent' })),
+      } },
+    });
+    const operations = await service._private.syncCalendarPair({
+      mapping: { icloudName: 'tatuajes', googleCalendarId: 'g1' },
+      calendar: { name: 'tatuajes', url: 'https://icloud.test/cal/' },
+      icloudEvents: [apple], token: 'token', start: new Date('2026-08-01Z'), end: new Date('2026-09-01Z'),
+      dryRun: true, request: async method => method === 'GET' ? { items: [google] } : {},
+    });
+    assert.deepEqual(operations.map(item => item.type), ['skip_unchanged']);
+  });
+
   await test('anade zona horaria a recurrencias iCloud que llegan en UTC', () => {
     const event = appleEvent({
       start: { dateTime: '2026-11-12T09:00:00.000Z' },

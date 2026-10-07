@@ -7,6 +7,7 @@ const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const { execFile } = require('node:child_process');
 const { syncBidirectional } = require('../../../src/services/calendarBidirectionalSyncService');
+const { importAules } = require('../../../src/services/aulesIcsImportService');
 const { createRemoteLease } = require('../../../src/services/calendarSyncRemoteLease');
 
 const ROOT = path.resolve(__dirname, '..', '..', '..');
@@ -23,6 +24,7 @@ function redact(value) {
     'CALENDAR_SYNC_LOCK_CALENDAR_ID', 'GOOGLE_CALENDAR_CLIENT_ID',
     'GOOGLE_CALENDAR_CLIENT_SECRET', 'GOOGLE_CALENDAR_REFRESH_TOKEN',
     'GOOGLE_SERVICE_ACCOUNT_EMAIL', 'GOOGLE_PRIVATE_KEY',
+    'AULES_ICS_URL',
   ];
   for (const name of sensitiveNames) {
     const secret = process.env[name];
@@ -102,6 +104,8 @@ async function verifyBotCalendars() {
 async function syncOnce({ dryRun, compact, mode }) {
   writeHeartbeat('running', { mode, dryRun });
   const startedAt = Date.now();
+  const aules = await importAules({ dryRun });
+  log('INFO', 'Importacion Aules completada.', { aules });
   const result = await syncBidirectional({ dryRun });
   print(result, { compact });
   writeHeartbeat('ok', { mode, dryRun, durationMs: Date.now() - startedAt, counts: result.counts });
