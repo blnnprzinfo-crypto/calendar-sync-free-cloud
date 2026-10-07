@@ -2,6 +2,7 @@
 
 const { createHash } = require('node:crypto');
 const { parseIcsEvents } = require('./calendarIcsEventParser');
+const { getCalendarMap } = require('./calendarBidirectionalSyncService');
 const googleAuth = require('./googleCalendarAuthService');
 
 const GOOGLE_BASE = 'https://www.googleapis.com/calendar/v3';
@@ -19,24 +20,14 @@ function normalizedCalendarName(value) {
 }
 
 function getTargetMapping() {
-  const raw = String(process.env.CALENDAR_SYNC_MAP_JSON || '').trim();
-  if (!raw) throw new Error('Falta CALENDAR_SYNC_MAP_JSON para localizar el calendario de Aules.');
-  let map;
-  try { map = JSON.parse(raw); } catch (error) {
-    throw new Error(`CALENDAR_SYNC_MAP_JSON no es JSON valido: ${error.message}`);
-  }
-  if (!map || Array.isArray(map) || typeof map !== 'object') {
-    throw new Error('CALENDAR_SYNC_MAP_JSON debe ser un objeto nombre_iCloud -> id_Google.');
-  }
+  const mappings = getCalendarMap();
   const requested = String(process.env.AULES_TARGET_ICLOUD_NAME || 'Uni').trim();
   const target = normalizedCalendarName(requested);
-  const matches = Object.entries(map).filter(([name, googleCalendarId]) => (
-    normalizedCalendarName(name) === target && String(googleCalendarId || '').trim()
-  ));
+  const matches = mappings.filter(mapping => normalizedCalendarName(mapping.icloudName) === target);
   if (matches.length !== 1) {
     throw new Error(`El calendario destino de Aules debe tener exactamente una coincidencia; encontradas: ${matches.length}.`);
   }
-  return { icloudName: matches[0][0], googleCalendarId: String(matches[0][1]).trim() };
+  return matches[0];
 }
 
 async function googleRequest(method, path, token, body = null) {
@@ -148,6 +139,15 @@ function buildAulesGoogleEvent(event, existing = null) {
   };
 }
 
+function matchesManagedEvent(current, expected) {
+  return current?.extendedProperties?.private?.belenciagaAulesFingerprint
+      === expected.extendedProperties.private.belenciagaAulesFingerprint
+    && current.summary === expected.summary
+    && JSON.stringify(current.start) === JSON.stringify(expected.start)
+    && JSON.stringify(current.end) === JSON.stringify(expected.end)
+    && current.transparency === 'transparent';
+}
+
 async function listManagedEvents({ calendarId, token, request }) {
   const items = [];
   let pageToken = '';
@@ -200,7 +200,7 @@ async function importAules(options = {}) {
     if (!current) {
       result.created++;
       mutations.push(['POST', `/calendars/${encodeURIComponent(mapping.googleCalendarId)}/events?sendUpdates=none`, body]);
-    } else if (current.extendedProperties?.private?.belenciagaAulesFingerprint === body.extendedProperties.private.belenciagaAulesFingerprint) {
+    } else if (matchesManagedEvent(current, body)) {
       result.unchanged++;
     } else {
       result.updated++;
@@ -216,5 +216,5 @@ async function importAules(options = {}) {
 
 module.exports = {
   importAules,
-  _private: { normalizedCalendarName, getTargetMapping, deadlineDate, buildAulesGoogleEvent, fetchFeed },
+  _private: { normalizedCalendarName, getTargetMapping, deadlineDate, buildAulesGoogleEvent, matchesManagedEvent, fetchFeed },
 };

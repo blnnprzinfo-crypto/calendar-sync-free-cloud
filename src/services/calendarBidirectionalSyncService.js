@@ -155,6 +155,17 @@ function contentFingerprint(event) {
   }));
 }
 
+// Huella usada despues de normalizar zonas horarias y antes de incorporar
+// transparency al contenido comparable.
+function preTransparencyContentFingerprint(event) {
+  const { transparency: _transparency, ...comparable } = comparableEvent(event);
+  return sha1(JSON.stringify({
+    ...comparable,
+    start: canonicalTime(comparable.start),
+    end: canonicalTime(comparable.end),
+  }));
+}
+
 // Huella anterior al arreglo de zonas horarias. Solo se usa para reconocer los
 // eventos ya sincronizados con el formato viejo y no reescribirlos sin motivo.
 function legacyContentFingerprint(event) {
@@ -419,9 +430,11 @@ async function syncCalendarPair({
       || (appleMatchesLegacy && transparencyMismatch);
     const currentGoogleFingerprint = contentFingerprint(googleEvent);
     const googleMatchesCurrent = props.belenciagaGoogleFingerprint === currentGoogleFingerprint;
+    const googleMatchesPreTransparency = props.belenciagaGoogleFingerprint === preTransparencyContentFingerprint(googleEvent);
     const googleMatchesLegacy = props.belenciagaGoogleFingerprint === legacyContentFingerprint(googleEvent);
     const googleChanged = Boolean(props.belenciagaGoogleFingerprint)
-      && ((!googleMatchesCurrent && !googleMatchesLegacy) || (googleMatchesLegacy && transparencyMismatch));
+      && ((!googleMatchesCurrent && !googleMatchesPreTransparency && !googleMatchesLegacy)
+        || ((googleMatchesPreTransparency || googleMatchesLegacy) && transparencyMismatch));
     if (!appleChanged && !googleChanged) {
       operations.push({ type: 'skip_unchanged', calendar: mapping.icloudName, summary: appleEvent.summary, sourceKey: appleEvent.sourceKey, googleUpdated: googleEvent.updated || '' });
       continue;
@@ -574,5 +587,9 @@ module.exports = {
   summaryDateKey,
   googleEventToIcs,
   selectConflictWinner,
-  _private: { buildGoogleFromIcloud, sourceKey, syncCalendarPair, normalizeName, legacyContentFingerprint, canonicalTime, isManagedGoogleCopyForMapping },
+  _private: {
+    buildGoogleFromIcloud, sourceKey, syncCalendarPair, normalizeName,
+    preTransparencyContentFingerprint, legacyContentFingerprint, canonicalTime,
+    isManagedGoogleCopyForMapping,
+  },
 };

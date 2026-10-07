@@ -35,15 +35,19 @@ function response(text, { status = 200, contentType = 'text/calendar' } = {}) {
 }
 
 function withEnv(fn) {
-  const oldMap = process.env.CALENDAR_SYNC_MAP_JSON;
-  const oldTarget = process.env.AULES_TARGET_ICLOUD_NAME;
+  const names = [
+    'CALENDAR_SYNC_MAP_JSON', 'AULES_TARGET_ICLOUD_NAME',
+    'CALENDAR_SYNC_ENFORCE_ALLOWLIST', 'CALENDAR_SYNC_ALLOWED_ICLOUD_NAMES_JSON',
+    'CALENDAR_SYNC_ALLOWED_GOOGLE_IDS_JSON',
+  ];
+  const old = Object.fromEntries(names.map(name => [name, process.env[name]]));
   process.env.CALENDAR_SYNC_MAP_JSON = JSON.stringify({ 'uni 🤓': 'google-uni', Trabajo: 'google-work' });
   delete process.env.AULES_TARGET_ICLOUD_NAME;
   return Promise.resolve().then(fn).finally(() => {
-    if (oldMap === undefined) delete process.env.CALENDAR_SYNC_MAP_JSON;
-    else process.env.CALENDAR_SYNC_MAP_JSON = oldMap;
-    if (oldTarget === undefined) delete process.env.AULES_TARGET_ICLOUD_NAME;
-    else process.env.AULES_TARGET_ICLOUD_NAME = oldTarget;
+    for (const name of names) {
+      if (old[name] === undefined) delete process.env[name];
+      else process.env[name] = old[name];
+    }
   });
 }
 
@@ -104,6 +108,43 @@ async function run() {
     assert.equal(methods.filter(method => method === 'POST').length, 1);
     assert.equal(methods.filter(method => method === 'PATCH').length, 1);
     assert.equal(stored[0].extendedProperties.private.belenciagaSourceKey, 'bridge-key');
+  }));
+
+  await test('autocorrige una entrega Aules cambiada a opaque', () => withEnv(async () => {
+    const stored = [];
+    const methods = [];
+    const request = async (method, path, token, body) => {
+      methods.push(method);
+      if (method === 'GET') return { items: stored };
+      if (method === 'POST') stored.push({ id: 'google-1', ...body });
+      if (method === 'PATCH') Object.assign(stored[0], body);
+      return stored[0];
+    };
+    const common = {
+      url: 'https://private.invalid/feed', tokenOverride: 'token',
+      fetchOverride: async () => response(feed()), googleRequestOverride: request,
+    };
+    await importAules(common);
+    stored[0].transparency = 'opaque';
+    const repaired = await importAules(common);
+    assert.equal(stored.length, 1);
+    assert.equal(repaired.updated, 1);
+    assert.equal(methods.filter(method => method === 'POST').length, 1);
+    assert.equal(methods.filter(method => method === 'PATCH').length, 1);
+    assert.equal(stored[0].transparency, 'transparent');
+  }));
+
+  await test('allowlist invalida falla antes de mutar Google', () => withEnv(async () => {
+    process.env.CALENDAR_SYNC_ENFORCE_ALLOWLIST = 'true';
+    process.env.CALENDAR_SYNC_ALLOWED_ICLOUD_NAMES_JSON = JSON.stringify(['Trabajo']);
+    process.env.CALENDAR_SYNC_ALLOWED_GOOGLE_IDS_JSON = JSON.stringify(['google-work']);
+    let googleCalls = 0;
+    await assert.rejects(() => importAules({
+      url: 'https://private.invalid/feed', tokenOverride: 'token',
+      fetchOverride: async () => response(feed()),
+      googleRequestOverride: async () => { googleCalls++; return {}; },
+    }), /fuera de la allowlist/);
+    assert.equal(googleCalls, 0);
   }));
 
   await test('feed sin eventos no borra nada', () => withEnv(async () => {

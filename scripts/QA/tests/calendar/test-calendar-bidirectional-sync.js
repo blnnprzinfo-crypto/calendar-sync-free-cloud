@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const { createHash } = require('node:crypto');
 const service = require('../../../../src/services/calendarBidirectionalSyncService');
 
 let passed = 0;
@@ -149,6 +150,33 @@ async function run() {
         belenciagaGoogleFingerprint: service._private.legacyContentFingerprint(googleEvent({ transparency: 'transparent' })),
       } },
     });
+    const operations = await service._private.syncCalendarPair({
+      mapping: { icloudName: 'tatuajes', googleCalendarId: 'g1' },
+      calendar: { name: 'tatuajes', url: 'https://icloud.test/cal/' },
+      icloudEvents: [apple], token: 'token', start: new Date('2026-08-01Z'), end: new Date('2026-09-01Z'),
+      dryRun: true, request: async method => method === 'GET' ? { items: [google] } : {},
+    });
+    assert.deepEqual(operations.map(item => item.type), ['skip_unchanged']);
+  });
+
+  await test('acepta la huella canonica anterior a transparency', async () => {
+    const apple = appleEvent({ transparency: 'transparent' });
+    const google = googleEvent({ transparency: 'transparent' });
+    const previousComparable = {
+      summary: google.summary,
+      description: google.description,
+      location: google.location,
+      start: service._private.canonicalTime(google.start),
+      end: service._private.canonicalTime(google.end),
+      recurrence: google.recurrence,
+      status: google.status,
+    };
+    const previousFingerprint = createHash('sha1').update(JSON.stringify(previousComparable)).digest('hex');
+    google.extendedProperties = { private: {
+      belenciagaSourceKey: apple.sourceKey,
+      belenciagaIcloudFingerprint: apple.fingerprint,
+      belenciagaGoogleFingerprint: previousFingerprint,
+    } };
     const operations = await service._private.syncCalendarPair({
       mapping: { icloudName: 'tatuajes', googleCalendarId: 'g1' },
       calendar: { name: 'tatuajes', url: 'https://icloud.test/cal/' },
