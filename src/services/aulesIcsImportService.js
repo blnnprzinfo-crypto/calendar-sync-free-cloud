@@ -48,14 +48,18 @@ async function googleRequest(method, path, token, body = null) {
 
 async function fetchFeed(url, fetchImpl) {
   let response;
-  try {
-    response = await fetchImpl(url, {
-      headers: { Accept: 'text/calendar' },
-      redirect: 'follow',
-      signal: AbortSignal.timeout(30_000),
-    });
-  } catch (_) {
-    throw new Error('No se pudo descargar el feed de Aules.');
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      response = await fetchImpl(url, {
+        headers: { Accept: 'text/calendar' },
+        redirect: 'follow',
+        signal: AbortSignal.timeout(30_000),
+      });
+      break;
+    } catch (_) {
+      if (attempt === 3) throw new Error('No se pudo descargar el feed de Aules tras 3 intentos.');
+      await new Promise(resolve => setTimeout(resolve, attempt * 1_000));
+    }
   }
   if (!response.ok) throw new Error(`Aules devolvio HTTP ${response.status}.`);
   const text = await response.text();

@@ -180,6 +180,21 @@ async function run() {
     assert.equal(googleCalls, 0);
   }));
 
+  await test('reintenta errores de red al descargar Aules', () => withEnv(async () => {
+    let fetchCalls = 0;
+    const result = await importAules({
+      url: 'https://private.invalid/feed', tokenOverride: 'token',
+      fetchOverride: async () => {
+        fetchCalls++;
+        if (fetchCalls < 3) throw new Error('fallo temporal');
+        return response(feed());
+      },
+      googleRequestOverride: async method => method === 'GET' ? { items: [] } : { id: 'created-retry' },
+    });
+    assert.equal(fetchCalls, 3);
+    assert.equal(result.created, 1);
+  }));
+
   console.log(`\nTotal Aules: ${passed + failed} | OK: ${passed} | FAIL: ${failed}`);
   if (failed) process.exit(1);
 }
