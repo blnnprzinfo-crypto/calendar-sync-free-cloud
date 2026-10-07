@@ -21,7 +21,7 @@ permissions:
 jobs:
   sync:
     runs-on: ubuntu-24.04
-    timeout-minutes: 4
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
