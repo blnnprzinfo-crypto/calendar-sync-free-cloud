@@ -97,8 +97,28 @@ function originalDeadline(event) {
   return raw;
 }
 
+function deadlineDate(event, timeZone = process.env.TZ || 'Europe/Madrid') {
+  if (event.start?.date) return event.start.date;
+  const dateTime = String(event.start?.dateTime || '');
+  if (!dateTime) return '';
+
+  // Moodle commonly exports deadlines in UTC. Convert instants to the target
+  // calendar's civil date so a 23:59 deadline does not land one day early.
+  if (/Z$|[+-]\d{2}:?\d{2}$/.test(dateTime)) {
+    const instant = new Date(dateTime);
+    if (Number.isNaN(instant.getTime())) return '';
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
+    }).formatToParts(instant);
+    const part = type => parts.find(item => item.type === type)?.value || '';
+    return `${part('year')}-${part('month')}-${part('day')}`;
+  }
+
+  return dateTime.slice(0, 10);
+}
+
 function buildAulesGoogleEvent(event, existing = null) {
-  const date = event.start?.date || String(event.start?.dateTime || '').slice(0, 10);
+  const date = deadlineDate(event);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error('Una entrega de Aules no tiene DTSTART valido.');
   const summary = String(event.summary || '').startsWith('📚') ? String(event.summary) : `📚 ${event.summary || 'Entrega'}`;
   const deadline = originalDeadline(event);
@@ -196,5 +216,5 @@ async function importAules(options = {}) {
 
 module.exports = {
   importAules,
-  _private: { normalizedCalendarName, getTargetMapping, buildAulesGoogleEvent, fetchFeed },
+  _private: { normalizedCalendarName, getTargetMapping, deadlineDate, buildAulesGoogleEvent, fetchFeed },
 };

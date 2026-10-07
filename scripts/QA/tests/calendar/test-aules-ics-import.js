@@ -67,6 +67,22 @@ async function run() {
     assert.match(body.description, /Fecha\/hora límite original: 2026-10-19 23:59:00/);
   }));
 
+  await test('convierte a Madrid una entrega UTC cercana a medianoche', () => withEnv(async () => {
+    const calls = [];
+    await importAules({
+      url: 'https://private.invalid/feed', tokenOverride: 'token',
+      fetchOverride: async () => response(feed({ start: '20261019T235900Z' })),
+      googleRequestOverride: async (method, path, token, body) => {
+        calls.push({ method, body });
+        return method === 'GET' ? { items: [] } : { id: 'created-utc' };
+      },
+    });
+    const body = calls.find(call => call.method === 'POST').body;
+    assert.deepEqual(body.start, { date: '2026-10-20' });
+    assert.deepEqual(body.end, { date: '2026-10-21' });
+    assert.match(body.description, /Fecha\/hora límite original: 2026-10-19 23:59:00 UTC/);
+  }));
+
   await test('dos ejecuciones no duplican y un cambio actualiza', () => withEnv(async () => {
     const stored = [];
     const methods = [];
