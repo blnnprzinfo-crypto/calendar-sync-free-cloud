@@ -145,6 +145,7 @@ function normalizeEvent(raw, meta = {}) {
   for (const prop of getAll(raw, 'RRULE')) recurrence.push(`RRULE:${prop.value}`);
   for (const prop of getAll(raw, 'EXDATE')) recurrence.push(`EXDATE:${prop.value}`);
 
+  const transp = String(getFirst(raw, 'TRANSP')?.value || '').trim().toUpperCase();
   const event = {
     uid,
     summary: unescapeIcsText(getFirst(raw, 'SUMMARY')?.value || 'ocupado'),
@@ -156,6 +157,8 @@ function normalizeEvent(raw, meta = {}) {
     start,
     end,
     recurrence,
+    transparency: transp === 'TRANSPARENT' ? 'transparent' : 'opaque',
+    originalStart: String(getFirst(raw, 'DTSTART')?.value || '').trim(),
     calendarName: meta.calendarName || '',
     calendarUrl: meta.calendarUrl || '',
     href: meta.href || '',
@@ -165,7 +168,7 @@ function normalizeEvent(raw, meta = {}) {
 
   const sourceBase = event.calendarUrl || event.calendarName || 'icloud';
   event.sourceKey = sha1(`${sourceBase}|${event.uid}`);
-  event.fingerprint = sha1(JSON.stringify({
+  const fingerprintFields = {
     uid: event.uid,
     summary: event.summary,
     description: event.description,
@@ -177,6 +180,11 @@ function normalizeEvent(raw, meta = {}) {
     end: event.end,
     recurrence: event.recurrence,
     etag: event.etag,
+  };
+  event.legacyFingerprint = sha1(JSON.stringify(fingerprintFields));
+  event.fingerprint = sha1(JSON.stringify({
+    ...fingerprintFields,
+    transparency: event.transparency,
   }));
 
   return event;
