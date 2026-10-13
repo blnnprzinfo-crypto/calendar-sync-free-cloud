@@ -24,7 +24,7 @@ async function scenario(mode) {
   const oldCalendar = process.env.CALENDAR_SYNC_LOCK_CALENDAR_ID;
   process.env.CALENDAR_SYNC_LOCK_CALENDAR_ID = 'technical';
   const originalIcs = 'BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:uid\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n';
-  apple._private.caldavRequest = async method => { assert.equal(method, 'GET'); return originalIcs; };
+  apple._private.caldavRequest = async method => { assert.equal(method, 'GET'); return { text: originalIcs, etag: 'apple-raw-etag' }; };
   apple.deleteCalendarObject = async args => {
     assert.ok(backup, 'Durable backup must precede deletion');
     assert.deepEqual(args, { url: event.href, etag: event.etag });

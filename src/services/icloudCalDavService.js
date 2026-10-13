@@ -108,7 +108,7 @@ async function caldavRequest(method, url, body, headers = {}) {
     err.body = text.slice(0, 300);
     throw err;
   }
-  return text;
+  return { text, etag: res.headers.get('etag') || '' };
 }
 
 async function putCalendarObject({ url, ics, etag = '', createOnly = false }) {
@@ -118,8 +118,8 @@ async function putCalendarObject({ url, ics, etag = '', createOnly = false }) {
   };
   if (createOnly) headers['If-None-Match'] = '*';
   else if (etag) headers['If-Match'] = etag;
-  await caldavRequest('PUT', url, ics, headers);
-  return { ok: true, url };
+  const response = await caldavRequest('PUT', url, ics, headers);
+  return { ok: true, url, etag: response.etag };
 }
 
 async function deleteCalendarObject({ url, etag = '' }) {
@@ -147,7 +147,8 @@ async function propfind(url, props, depth = '0') {
 <d:propfind xmlns:d="DAV:" xmlns:cs="http://calendarserver.org/ns/" xmlns:c="urn:ietf:params:xml:ns:caldav">
   <d:prop>${props}</d:prop>
 </d:propfind>`;
-  return caldavRequest('PROPFIND', url, body, { Depth: depth });
+  const response = await caldavRequest('PROPFIND', url, body, { Depth: depth });
+  return response.text;
 }
 
 async function calendarReport(url, start, end) {
@@ -165,7 +166,17 @@ async function calendarReport(url, start, end) {
     </c:comp-filter>
   </c:filter>
 </c:calendar-query>`;
-  return caldavRequest('REPORT', url, body, { Depth: '1' });
+  const response = await caldavRequest('REPORT', url, body, { Depth: '1' });
+  return response.text;
+}
+
+async function fetchCalendarObjectByHref(url, meta = {}) {
+  const response = await caldavRequest('GET', url, null, {
+    'Content-Type': 'text/calendar; charset=utf-8',
+    Depth: '0',
+  });
+  const events = parseIcsEvents(response.text, { ...meta, href: url, etag: response.etag });
+  return events[0] || null;
 }
 
 function validateConfig() {
@@ -303,6 +314,7 @@ module.exports = {
   getSelectedCalendars,
   fetchEventsFromCalendar,
   fetchIcloudEvents,
+  fetchCalendarObjectByHref,
   putCalendarObject,
   deleteCalendarObject,
   calendarObjectExists,
