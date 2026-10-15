@@ -2,10 +2,10 @@
 // Read-only integrity audit: September 15-18, 2026 Scotland trip in plans calendar.
 // No event names, locations, descriptions, identifiers or secrets are logged.
 require('dotenv').config();
-const googleAuth = require('../../../src/services/googleCalendarAuthService');
-const icloud = require('../../../src/services/icloudCalDavService');
+const googleAuth = require('../../src/services/googleCalendarAuthService');
+const icloud = require('../../src/services/icloudCalDavService');
 const { getCalendarMap, _private: { normalizeName, canonicalTime } } =
-  require('../../../src/services/calendarBidirectionalSyncService');
+  require('../../src/services/calendarBidirectionalSyncService');
 const START = new Date('2026-09-14T22:00:00Z');
 const END = new Date('2026-09-19T00:00:00Z');
 const EXPECTED_GOOGLE = 'adb50694b3065cfe8bea3d5139a081f827be2c0c5e6060d14399fd7d6f33ab6b@group.calendar.google.com';
