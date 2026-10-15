@@ -15,7 +15,8 @@ try {
     throw new Error(`heartbeat obsoleto: ${ageSeconds}s (maximo ${maxAgeSeconds}s)`);
   }
   if (heartbeat.status === 'error') throw new Error('el ultimo estado es error');
-  console.log(`[calendar-health] OK age=${ageSeconds}s status=${heartbeat.status} mode=${heartbeat.mode || 'unknown'}`);
+  const level = heartbeat.status === 'degraded' ? 'WARN' : 'OK';
+  console.log(`[calendar-health] ${level} age=${ageSeconds}s status=${heartbeat.status} mode=${heartbeat.mode || 'unknown'}`);
 } catch (error) {
   console.error(`[calendar-health] FAIL ${error.message}`);
   process.exit(1);
