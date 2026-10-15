@@ -152,9 +152,12 @@ async function prepare() {
   const appleObjects = [];
   for (const item of apple) {
     const ics = await icloud._private.caldavRequest('GET', item.href, null, { 'Content-Type': 'text/calendar; charset=utf-8' });
-    if ((ics.match(/(?:^|\r?\n)BEGIN:VEVENT(?:\r?\n|$)/g) || []).length !== 1
-      || /(?:^|\r?\n)(?:RRULE|RDATE|RECURRENCE-ID)[;:]/im.test(ics)) {
-      throw new Error('ABORT: iCloud object includes recurrence or multiple VEVENTs');
+    const eventBlocks = ics.match(/BEGIN:VEVENT[\s\S]*?END:VEVENT/g) || [];
+    // VTIMEZONE can legitimately contain RRULE/RDATE for daylight-saving
+    // transitions; only recurrence inside VEVENT would make deletion unsafe.
+    if (eventBlocks.length !== 1
+      || /(?:^|\r?\n)(?:RRULE|RDATE|RECURRENCE-ID)[;:]/im.test(eventBlocks[0])) {
+      throw new Error('ABORT: iCloud VEVENT includes recurrence or multi-event resource');
     }
     appleObjects.push({ ...item, ics });
     backupPayloadSize({ kind: 'icloud', key: item.href, ics, etag: item.etag });
