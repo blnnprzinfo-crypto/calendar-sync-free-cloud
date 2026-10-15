@@ -4,6 +4,7 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/audit-scotland-20260915.yml'
+      - 'scripts/QA/audit-scotland-20260915.js'
 permissions:
   contents: read
 jobs:
