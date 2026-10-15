@@ -1,14 +1,8 @@
 name: Calendar sync
 
+# Temporary safety pause while verifying Scotland and Cuenca calendar integrity.
+# Manual workflow_dispatch remains available; no scheduled or push-triggered writes.
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'src/services/**'
-      - 'scripts/PRODUCTION/**'
-      - '.github/workflows/calendar-sync.yml'
-  schedule:
-    - cron: '2-59/5 * * * *'
   workflow_dispatch:
 
 concurrency:
