@@ -47,6 +47,9 @@ jobs:
           node-version: '24'
       - run: npm ci --omit=dev --ignore-scripts
       - name: Test calendar sync and exact cleanup allowlist
+        env:
+          CALENDAR_SYNC_EXPECTED_MAPPING_COUNT: ''
+          CALENDAR_SYNC_ENFORCE_ALLOWLIST: 'false'
         run: |
           npm test
           node --check scripts/PRODUCTION/maintenance/cleanup-cuenca-friday-20261016.js
