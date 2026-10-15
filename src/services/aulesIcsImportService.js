@@ -46,6 +46,12 @@ async function googleRequest(method, path, token, body = null) {
   return data;
 }
 
+function aulesFeedError(message) {
+  const error = new Error(message);
+  error.name = 'AulesFeedError';
+  return error;
+}
+
 async function fetchFeed(url, fetchImpl) {
   let response;
   for (let attempt = 1; attempt <= 3; attempt++) {
@@ -57,20 +63,20 @@ async function fetchFeed(url, fetchImpl) {
       });
       break;
     } catch (_) {
-      if (attempt === 3) throw new Error('No se pudo descargar el feed de Aules tras 3 intentos.');
+      if (attempt === 3) throw aulesFeedError('No se pudo descargar el feed de Aules tras 3 intentos.');
       await new Promise(resolve => setTimeout(resolve, attempt * 1_000));
     }
   }
-  if (!response.ok) throw new Error(`Aules devolvio HTTP ${response.status}.`);
+  if (!response.ok) throw aulesFeedError(`Aules devolvio HTTP ${response.status}.`);
   const text = await response.text();
   const trimmed = text.trim();
   const contentType = String(response.headers?.get?.('content-type') || '').toLowerCase();
-  if (!trimmed) throw new Error('Aules devolvio contenido vacio.');
+  if (!trimmed) throw aulesFeedError('Aules devolvio contenido vacio.');
   if (/text\/html|application\/xhtml/.test(contentType) || /^\s*<!doctype\s+html|^\s*<html/i.test(trimmed)) {
-    throw new Error('Aules devolvio HTML en vez de ICS.');
+    throw aulesFeedError('Aules devolvio HTML en vez de ICS.');
   }
   if (!/^BEGIN:VCALENDAR(?:\r?\n|$)/m.test(trimmed) || !/(?:^|\r?\n)END:VCALENDAR(?:\r?\n|$)/m.test(trimmed)) {
-    throw new Error('Aules devolvio contenido ICS no valido.');
+    throw aulesFeedError('Aules devolvio contenido ICS no valido.');
   }
   return text;
 }
