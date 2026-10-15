@@ -50,8 +50,17 @@ async function main() {
     throw new Error('Unexpected calendar mapping; no audit');
   const calendars = (await icloud.discoverCalendars()).filter(x => normalizeName(x.name) === normalizeName(mapping[0].icloudName));
   if (calendars.length !== 1) throw new Error('No unique iCloud plans calendar');
+  async function fetchAppleWithRetry() {
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try { return await icloud.fetchEventsFromCalendar(calendars[0], START, END); }
+      catch (error) {
+        if (![429, 502, 503, 504].includes(error.status) || attempt === 3) throw error;
+        await new Promise(resolve => setTimeout(resolve, attempt * 1500));
+      }
+    }
+  }
   const [apple, google] = await Promise.all([
-    icloud.fetchEventsFromCalendar(calendars[0], START, END), googleList(EXPECTED_GOOGLE),
+    fetchAppleWithRetry(), googleList(EXPECTED_GOOGLE),
   ]);
   const am = count(apple), gm = count(google);
   const unmatchedGoogle = [], unmatchedApple = [];
