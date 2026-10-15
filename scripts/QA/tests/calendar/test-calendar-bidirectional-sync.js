@@ -303,6 +303,89 @@ async function run() {
     assert.match(calls.find(call => call.method === 'DELETE').path, /orphan-3/);
   });
 
+  await test('DELETE 404/410 de huerfano Google ya eliminado no aborta el sync', async () => {
+    const calendar = { name: 'tatuajes', url: 'https://icloud.test/cal/' };
+    const uid = 'orphan-race';
+    const linked = googleEvent({ id: 'already-removed', extendedProperties: { private: {
+      belenciagaSource: 'google-calendar-bidirectional',
+      belenciagaSourceKey: service._private.sourceKey(calendar.url, uid),
+      belenciagaIcloudUid: uid,
+      belenciagaIcloudCalendar: 'tatuajes',
+    } } });
+    for (const status of [404, 410]) {
+      let attempts = 0;
+      const request = async method => {
+        if (method === 'GET') return { items: [linked] };
+        assert.equal(method, 'DELETE');
+        attempts++;
+        throw Object.assign(new Error('Resource has been deleted'), { status });
+      };
+      const operations = await service._private.syncCalendarPair({
+        mapping: { icloudName: 'tatuajes', googleCalendarId: 'g1' }, calendar,
+        icloudEvents: [], token: 'token', start: new Date('2026-08-01Z'), end: new Date('2026-09-01Z'),
+        dryRun: false, request, pruneManagedGoogleOrphans: true,
+        icloudObjectExists: async () => false,
+      });
+      assert.equal(attempts, 1);
+      assert.deepEqual(operations.map(op => op.type), ['skip_google_already_deleted']);
+    }
+  });
+
+  await test('DELETE 404/410 de Google duplicado ya eliminado no aborta el sync', async () => {
+    const apple = appleEvent();
+    const calendar = { name: 'tatuajes', url: 'https://icloud.test/cal/' };
+    apple.sourceKey = service._private.sourceKey(calendar.url, apple.uid);
+    const props = {
+      belenciagaSource: 'icloud-caldav-bidirectional',
+      belenciagaSourceKey: apple.sourceKey,
+      belenciagaIcloudUid: apple.uid,
+      belenciagaIcloudCalendar: 'tatuajes',
+      belenciagaIcloudFingerprint: apple.fingerprint,
+      belenciagaGoogleFingerprint: service.contentFingerprint(googleEvent()),
+    };
+    const canonical = googleEvent({ id: 'canonical', extendedProperties: { private: props } });
+    const duplicate = googleEvent({ id: 'duplicate', extendedProperties: { private: props } });
+    for (const status of [404, 410]) {
+      let attempts = 0;
+      const request = async (method, path) => {
+        if (method === 'GET') return { items: [canonical, duplicate] };
+        assert.equal(method, 'DELETE');
+        assert.match(path, /duplicate/);
+        attempts++;
+        throw Object.assign(new Error('Resource has been deleted'), { status });
+      };
+      const operations = await service._private.syncCalendarPair({
+        mapping: { icloudName: 'tatuajes', googleCalendarId: 'g1' }, calendar,
+        icloudEvents: [apple], token: 'token', start: new Date('2026-08-01Z'), end: new Date('2026-09-01Z'),
+        dryRun: false, request, pruneManagedGoogleOrphans: true,
+        icloudObjectExists: async () => true,
+      });
+      assert.equal(attempts, 1);
+      assert.deepEqual(operations.map(op => op.type), ['skip_unchanged', 'skip_google_already_deleted']);
+    }
+  });
+
+  await test('DELETE Google 403 sigue siendo fatal', async () => {
+    const calendar = { name: 'tatuajes', url: 'https://icloud.test/cal/' };
+    const uid = 'orphan-permission';
+    const linked = googleEvent({ id: 'forbidden-delete', extendedProperties: { private: {
+      belenciagaSource: 'google-calendar-bidirectional',
+      belenciagaSourceKey: service._private.sourceKey(calendar.url, uid),
+      belenciagaIcloudUid: uid,
+      belenciagaIcloudCalendar: 'tatuajes',
+    } } });
+    const request = async method => {
+      if (method === 'GET') return { items: [linked] };
+      throw Object.assign(new Error('Permission denied'), { status: 403 });
+    };
+    await assert.rejects(() => service._private.syncCalendarPair({
+      mapping: { icloudName: 'tatuajes', googleCalendarId: 'g1' }, calendar,
+      icloudEvents: [], token: 'token', start: new Date('2026-08-01Z'), end: new Date('2026-09-01Z'),
+      dryRun: false, request, pruneManagedGoogleOrphans: true,
+      icloudObjectExists: async () => false,
+    }), error => error.status === 403);
+  });
+
   await test('no borra un evento con metadatos incompletos o de otro calendario', async () => {
     const linked = googleEvent({ extendedProperties: { private: {
       belenciagaSource: 'icloud-caldav-bidirectional',

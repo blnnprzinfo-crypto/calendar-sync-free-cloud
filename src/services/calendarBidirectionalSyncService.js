@@ -315,6 +315,19 @@ function isManagedGoogleCopyForMapping(event, mapping, calendar) {
     && sourceKey(calendar.url, uid) === linkedKey;
 }
 
+// Google may report an already removed managed copy as 404 or 410.
+// Ignore only those idempotent outcomes. Auth and other failures remain fatal.
+async function deleteManagedGoogleCopy(request, calendarId, eventId, token) {
+  const path = `/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}?sendUpdates=none`;
+  try {
+    await request('DELETE', path, token);
+    return true;
+  } catch (error) {
+    if (error?.status === 404 || error?.status === 410) return false;
+    throw error;
+  }
+}
+
 async function syncCalendarPair({
   mapping, calendar, icloudEvents, token, start, end, dryRun, request,
   pruneManagedGoogleOrphans = false,
@@ -488,7 +501,8 @@ async function syncCalendarPair({
           summary: googleEvent.summary, sourceKey: linkedKey, googleUpdated: googleEvent.updated || '',
         });
         if (!dryRun) {
-          await request('DELETE', `/calendars/${encodeURIComponent(mapping.googleCalendarId)}/events/${encodeURIComponent(googleEvent.id)}?sendUpdates=none`, token);
+          const removed = await deleteManagedGoogleCopy(request, mapping.googleCalendarId, googleEvent.id, token);
+          if (!removed) operations[operations.length - 1].type = 'skip_google_already_deleted';
         }
         continue;
       }
@@ -500,7 +514,8 @@ async function syncCalendarPair({
         summary: googleEvent.summary, sourceKey: linkedKey, googleUpdated: googleEvent.updated || '',
       });
       if (!dryRun) {
-        await request('DELETE', `/calendars/${encodeURIComponent(mapping.googleCalendarId)}/events/${encodeURIComponent(googleEvent.id)}?sendUpdates=none`, token);
+        const removed = await deleteManagedGoogleCopy(request, mapping.googleCalendarId, googleEvent.id, token);
+        if (!removed) operations[operations.length - 1].type = 'skip_google_already_deleted';
       }
       continue;
     }
