@@ -1,0 +1,70 @@
+name: One-time bidirectional calendar smoke test
+on:
+  pull_request:
+    paths:
+      - 'scripts/QA/live-bidirectional-smoke-20261015.js'
+      - '.github/workflows/live-bidirectional-smoke-20261015.yml'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/live-bidirectional-smoke-20261015.yml'
+
+concurrency:
+  group: calendar-sync-single-writer
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - run: npm ci --omit=dev --ignore-scripts
+      - name: Baseline tests and syntax
+        run: |
+          npm test
+          node --check scripts/QA/live-bidirectional-smoke-20261015.js
+      - name: Read-only preflight
+        env:
+          SYNC_SMOKE_PREFLIGHT: 'true'
+          TZ: Europe/Madrid
+          CALENDAR_SYNC_MAP_JSON: ${{ secrets.CALENDAR_SYNC_MAP_JSON }}
+          CALENDAR_SYNC_EXPECTED_MAPPING_COUNT: ${{ secrets.CALENDAR_SYNC_EXPECTED_MAPPING_COUNT }}
+          CALENDAR_SYNC_ENFORCE_ALLOWLIST: 'true'
+          CALENDAR_SYNC_ALLOWED_ICLOUD_NAMES_JSON: ${{ secrets.CALENDAR_SYNC_ALLOWED_ICLOUD_NAMES_JSON }}
+          CALENDAR_SYNC_ALLOWED_GOOGLE_IDS_JSON: ${{ secrets.CALENDAR_SYNC_ALLOWED_GOOGLE_IDS_JSON }}
+          ICLOUD_USERNAME: ${{ secrets.ICLOUD_USERNAME }}
+          ICLOUD_APP_PASSWORD: ${{ secrets.ICLOUD_APP_PASSWORD }}
+          ICLOUD_CALDAV_BASE_URL: https://caldav.icloud.com/
+          GOOGLE_CALENDAR_AUTH_MODE: service_account
+          GOOGLE_SERVICE_ACCOUNT_EMAIL: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_EMAIL }}
+          GOOGLE_PRIVATE_KEY: ${{ secrets.GOOGLE_PRIVATE_KEY }}
+          GOOGLE_CALENDAR_SCOPE: https://www.googleapis.com/auth/calendar
+        run: node scripts/QA/live-bidirectional-smoke-20261015.js
+      - name: Execute isolated CRUD test once on main
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          SYNC_SMOKE_APPLY: 'true'
+          TZ: Europe/Madrid
+          CALENDAR_SYNC_MAP_JSON: ${{ secrets.CALENDAR_SYNC_MAP_JSON }}
+          CALENDAR_SYNC_EXPECTED_MAPPING_COUNT: ${{ secrets.CALENDAR_SYNC_EXPECTED_MAPPING_COUNT }}
+          CALENDAR_SYNC_ENFORCE_ALLOWLIST: 'true'
+          CALENDAR_SYNC_ALLOWED_ICLOUD_NAMES_JSON: ${{ secrets.CALENDAR_SYNC_ALLOWED_ICLOUD_NAMES_JSON }}
+          CALENDAR_SYNC_ALLOWED_GOOGLE_IDS_JSON: ${{ secrets.CALENDAR_SYNC_ALLOWED_GOOGLE_IDS_JSON }}
+          CALENDAR_SYNC_LOCK_CALENDAR_ID: ${{ secrets.CALENDAR_SYNC_LOCK_CALENDAR_ID }}
+          CALENDAR_SYNC_LOCK_TTL_SECONDS: '600'
+          CALENDAR_SYNC_LOCK_ALLOW_CREATE: 'false'
+          ICLOUD_USERNAME: ${{ secrets.ICLOUD_USERNAME }}
+          ICLOUD_APP_PASSWORD: ${{ secrets.ICLOUD_APP_PASSWORD }}
+          ICLOUD_CALDAV_BASE_URL: https://caldav.icloud.com/
+          GOOGLE_CALENDAR_AUTH_MODE: service_account
+          GOOGLE_SERVICE_ACCOUNT_EMAIL: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_EMAIL }}
+          GOOGLE_PRIVATE_KEY: ${{ secrets.GOOGLE_PRIVATE_KEY }}
+          GOOGLE_CALENDAR_SCOPE: https://www.googleapis.com/auth/calendar
+        run: node scripts/QA/live-bidirectional-smoke-20261015.js
