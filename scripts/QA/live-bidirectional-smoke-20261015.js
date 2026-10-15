@@ -4,10 +4,10 @@
 require('dotenv').config();
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
-const sync = require('../../../src/services/calendarBidirectionalSyncService');
-const apple = require('../../../src/services/icloudCalDavService');
-const auth = require('../../../src/services/googleCalendarAuthService');
-const { createRemoteLease } = require('../../../src/services/calendarSyncRemoteLease');
+const sync = require('../../src/services/calendarBidirectionalSyncService');
+const apple = require('../../src/services/icloudCalDavService');
+const auth = require('../../src/services/googleCalendarAuthService');
+const { createRemoteLease } = require('../../src/services/calendarSyncRemoteLease');
 
 const GOOGLE_ID = 'adb50694b3065cfe8bea3d5139a081f827be2c0c5e6060d14399fd7d6f33ab6b@group.calendar.google.com';
 const START = new Date('2027-08-20T22:00:00.000Z');
