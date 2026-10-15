@@ -180,6 +180,26 @@ async function run() {
     assert.equal(googleCalls, 0);
   }));
 
+  await test('un feed HTTP no disponible falla de forma identificable sin mutar Google', () => withEnv(async () => {
+    let googleCalls = 0;
+    await assert.rejects(() => importAules({
+      url: 'https://private.invalid/feed', tokenOverride: 'token',
+      fetchOverride: async () => response('unavailable', { status: 503 }),
+      googleRequestOverride: async () => { googleCalls++; return {}; },
+    }), error => error.name === 'AulesFeedError' && /HTTP 503/.test(error.message));
+    assert.equal(googleCalls, 0);
+  }));
+
+  await test('el feed HTML genera el mismo fallo recuperable sin mutaciones', () => withEnv(async () => {
+    let googleCalls = 0;
+    await assert.rejects(() => importAules({
+      url: 'https://private.invalid/feed', tokenOverride: 'token',
+      fetchOverride: async () => response('<html>login</html>', { contentType: 'text/html' }),
+      googleRequestOverride: async () => { googleCalls++; return {}; },
+    }), error => error.name === 'AulesFeedError' && /HTML/.test(error.message));
+    assert.equal(googleCalls, 0);
+  }));
+
   await test('reintenta errores de red al descargar Aules', () => withEnv(async () => {
     let fetchCalls = 0;
     const result = await importAules({

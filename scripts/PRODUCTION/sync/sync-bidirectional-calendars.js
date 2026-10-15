@@ -104,11 +104,25 @@ async function verifyBotCalendars() {
 async function syncOnce({ dryRun, compact, mode }) {
   writeHeartbeat('running', { mode, dryRun });
   const startedAt = Date.now();
-  const aules = await importAules({ dryRun });
-  log('INFO', 'Importacion Aules completada.', { aules });
+  let aules;
+  try {
+    aules = await importAules({ dryRun });
+    log('INFO', 'Importacion Aules completada.', { aules });
+  } catch (error) {
+    // An unavailable Aules feed must not stop the independent Google <-> iCloud bridge.
+    // All mapping, authorization and Google write failures remain fatal.
+    if (error?.name !== 'AulesFeedError') throw error;
+    aules = { source: 0, created: 0, updated: 0, unchanged: 0, skipped: 'feed_unavailable' };
+    log('WARN', 'Feed Aules no disponible: se conservan las entregas existentes y continua el puente de calendarios.', {
+      reason: error.message,
+    });
+  }
   const result = await syncBidirectional({ dryRun });
   print(result, { compact });
-  writeHeartbeat('ok', { mode, dryRun, durationMs: Date.now() - startedAt, counts: result.counts });
+  writeHeartbeat(aules.skipped === 'feed_unavailable' ? 'degraded' : 'ok', {
+    mode, dryRun, durationMs: Date.now() - startedAt, counts: result.counts,
+    aulesStatus: aules.skipped === 'feed_unavailable' ? 'feed_unavailable' : 'ok',
+  });
   systemdNotify('WATCHDOG=1');
   return result;
 }
