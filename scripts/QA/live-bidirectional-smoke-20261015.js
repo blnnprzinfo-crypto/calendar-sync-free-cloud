@@ -187,7 +187,8 @@ async function cleanup() {
   return failures;
 }
 async function main() {
-  if(process.env.SYNC_SMOKE_APPLY!=='true')throw new Error('Refusing writes without explicit smoke-test flag');
+  if(process.env.SYNC_SMOKE_APPLY!=='true' && process.env.SYNC_SMOKE_PREFLIGHT!=='true')
+    throw new Error('Refusing run without explicit smoke-test/preflight flag');
   if(process.env.CALENDAR_SYNC_ENFORCE_ALLOWLIST!=='true')throw new Error('Strict allowlist must be enabled');
   const mappings=sync.getCalendarMap().filter(x=>sync._private.normalizeName(x.icloudName).startsWith('planes'));
   if(mappings.length!==1 || mappings[0].googleCalendarId!==GOOGLE_ID)
@@ -202,6 +203,7 @@ async function main() {
   if(initialApple.length || initialGoogle.some(x=>x.status!=='cancelled'))
     throw new Error('ABORT: test date is not empty on both calendars');
   output('preflight-empty',{icloud:0,google:0});
+  if(process.env.SYNC_SMOKE_PREFLIGHT==='true')return;
   lease=createRemoteLease({writerId:'bidirectional-smoke-20261015'});
   await lease.acquire();
   guardApple();
