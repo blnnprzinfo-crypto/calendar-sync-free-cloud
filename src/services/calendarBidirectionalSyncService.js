@@ -208,7 +208,7 @@ function toIcsDateValue(value, fallbackTimezone = 'Europe/Madrid', recurring = f
   // weekly 09:40 meeting drift to 08:40/10:40 after a DST transition.
   if (recurring) {
     let local;
-    if (/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(?::\\d{2})?$/.test(raw)) {
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?$/.test(raw)) {
       local = raw.length === 16 ? `${raw}:00` : raw;
     } else {
       const instant = new Date(raw);
@@ -227,7 +227,7 @@ function toIcsDateValue(value, fallbackTimezone = 'Europe/Madrid', recurring = f
   if (!Number.isNaN(parsed.getTime())) {
     return { line: `:${parsed.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z')}`, allDay: false };
   }
-  if (!/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(?::\\d{2})?$/.test(raw)) {
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?$/.test(raw)) {
     throw new Error('Invalid event datetime');
   }
   return { line: `;TZID=${timezone}:${raw.replace(/[-:]/g, '')}`, allDay: false };
