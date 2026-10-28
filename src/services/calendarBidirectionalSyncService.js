@@ -198,23 +198,48 @@ function escapeIcs(value) {
     .replace(/;/g, '\\;');
 }
 
-function toIcsDateValue(value, fallbackTimezone = 'Europe/Madrid') {
+function toIcsDateValue(value, fallbackTimezone = 'Europe/Madrid', recurring = false) {
   if (value?.date) return { line: `;VALUE=DATE:${value.date.replace(/-/g, '')}`, allDay: true };
   if (!value?.dateTime) return null;
-  const parsed = new Date(value.dateTime);
-  if (!Number.isNaN(parsed.getTime())) {
-    return { line: `:${parsed.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z')}`, allDay: false };
+  const raw = String(value.dateTime);
+  const timezone = value.timeZone || fallbackTimezone;
+
+  // Recurring wall-clock appointments must use TZID. UTC DTSTART makes a
+  // weekly 09:40 meeting drift to 08:40/10:40 after a DST transition.
+  if (recurring) {
+    let local;
+    if (/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(?::\\d{2})?$/.test(raw)) {
+      local = raw.length === 16 ? `${raw}:00` : raw;
+    } else {
+      const instant = new Date(raw);
+      if (Number.isNaN(instant.getTime())) throw new Error('Invalid recurring event datetime');
+      const parts = new Intl.DateTimeFormat('en-GB', {
+        timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+      }).formatToParts(instant);
+      const get = type => parts.find(part => part.type === type).value;
+      local = `${get('year')}-${get('month')}-${get('day')}T${get('hour')}:${get('minute')}:${get('second')}`;
+    }
+    return { line: `;TZID=${timezone}:${local.replace(/[-:]/g, '')}`, allDay: false };
   }
-  const raw = String(value.dateTime).replace(/[-:]/g, '').replace(/\.\d+$/, '');
-  return { line: `;TZID=${value.timeZone || fallbackTimezone}:${raw}`, allDay: false };
+
+  const parsed = new Date(raw);
+  if (!Number.isNaN(parsed.getTime())) {
+    return { line: `:${parsed.toISOString().replace(/[-:]/g, '').replace(/\\.\\d{3}Z$/, 'Z')}`, allDay: false };
+  }
+  if (!/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(?::\\d{2})?$/.test(raw)) {
+    throw new Error('Invalid event datetime');
+  }
+  return { line: `;TZID=${timezone}:${raw.replace(/[-:]/g, '')}`, allDay: false };
 }
 
 function googleEventToIcs(event, uid, alarms = []) {
   const now = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
-  const start = toIcsDateValue(event.start);
-  const end = toIcsDateValue(event.end);
+  const recurring = Boolean(event.recurrence?.length);
+  const start = toIcsDateValue(event.start, 'Europe/Madrid', recurring);
+  const end = toIcsDateValue(event.end, 'Europe/Madrid', recurring);
   if (!start || !end) throw new Error(`Evento Google sin fechas validas: ${event.id || event.summary}`);
-  const recurrence = (event.recurrence || []).filter(line => /^(RRULE|EXDATE):/i.test(line));
+  const recurrence = (event.recurrence || []).filter(line => /^(RRULE|EXDATE)(;[^:]*)?:/i.test(line));
   const lines = [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
