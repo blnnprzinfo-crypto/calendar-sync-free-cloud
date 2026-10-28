@@ -225,7 +225,7 @@ function toIcsDateValue(value, fallbackTimezone = 'Europe/Madrid', recurring = f
 
   const parsed = new Date(raw);
   if (!Number.isNaN(parsed.getTime())) {
-    return { line: `:${parsed.toISOString().replace(/[-:]/g, '').replace(/\\.\\d{3}Z$/, 'Z')}`, allDay: false };
+    return { line: `:${parsed.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z')}`, allDay: false };
   }
   if (!/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(?::\\d{2})?$/.test(raw)) {
     throw new Error('Invalid event datetime');
